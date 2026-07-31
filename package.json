@@ -1,0 +1,63 @@
+{
+  "name": "flashover",
+  "version": "0.1.0",
+  "description": "Ignite N coding agents at once. Ship the one that survives. Parallel agent tournaments with deterministic verification gates.",
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-agent",
+    "orchestration",
+    "parallel",
+    "best-of-n",
+    "git-worktree",
+    "claude-code",
+    "codex",
+    "cli",
+    "verification"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "bin": {
+    "flashover": "dist/cli.js",
+    "fo": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build:test && node --test \"dist-test/test/*.test.js\"",
+    "clean": "rm -rf dist dist-test",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/flashover.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OWNER/flashover/issues"
+  },
+  "homepage": "https://github.com/OWNER/flashover#readme"
+}

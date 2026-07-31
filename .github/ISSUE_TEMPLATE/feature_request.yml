@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a capability flashover does not have
+title: '[feature] '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What are you trying to do that flashover makes hard or impossible?
+        Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: A sketch is fine. Config snippets or CLI examples help.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you work around it today
+      description: |
+        Gates and judges are arbitrary commands, so a surprising amount is already
+        possible without changing flashover. If you found a workaround, say so — it
+        might be the answer, or it might show why the feature is needed.
+    validations:
+      required: false

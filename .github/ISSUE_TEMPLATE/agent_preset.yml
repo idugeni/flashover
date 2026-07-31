@@ -1,0 +1,58 @@
+name: Agent preset is wrong or missing
+description: A built-in agent preset uses stale flags, or an agent has no preset yet
+title: '[preset] '
+labels: [preset]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agent CLIs change their flags constantly, so this is the most common way flashover
+        breaks — and the most useful kind of report. Thank you.
+
+  - type: input
+    id: agent
+    attributes:
+      label: Agent CLI
+      placeholder: claude, codex, cursor-agent, aider, ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Agent version
+      description: Output of `<agent> --version`
+    validations:
+      required: true
+
+  - type: textarea
+    id: working
+    attributes:
+      label: Invocation that works
+      description: |
+        The exact command that runs this agent non-interactively, edits files in place,
+        and exits 0. This is the part we need most.
+      render: shell
+      placeholder: claude -p "fix the failing test" --permission-mode acceptEdits
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What flashover currently does
+      description: Output of `flashover --dry-run "test task"`, plus the failure you see.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: requirements
+    attributes:
+      label: The agent meets the preset requirements
+      description: See CONTRIBUTING.md. Uncheck anything that does not hold.
+      options:
+        - label: Runs fully non-interactively, never prompts
+        - label: Edits files in place in its working directory
+        - label: Exits 0 on success, non-zero on failure
+        - label: Does not create git commits itself

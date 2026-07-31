@@ -1,0 +1,58 @@
+name: Bug report
+description: flashover did something wrong
+title: '[bug] '
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      render: shell
+      placeholder: flashover "fix the auth test" -a claude -n 3 -g "!test:npm test"
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: flashover doctor
+      description: Output of `flashover doctor`.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: flashover.yaml
+      description: Your config, with secrets removed.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Report and transcripts
+      description: |
+        Relevant parts of `.flashover/run-*/report.json` and `.flashover/run-*/logs/*.log`.
+        Please remove any secrets first — agent transcripts can contain them.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and git version
+      placeholder: macOS 15.2, git 2.47.1
+    validations:
+      required: true

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-test/
+*.tsbuildinfo
+
+# flashover run artifacts (worktrees, logs, patches, reports)
+.flashover/
+
+# editors / os
+.DS_Store
+*.log
+.idea/
+.vscode/

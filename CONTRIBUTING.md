@@ -13,6 +13,8 @@ npm install
 npm run build
 ```
 
+flashover is Linux and macOS only, and `package.json` declares `"os": ["!win32"]` so npm refuses to install it elsewhere rather than failing later at the first gate. On Windows, `npm install --force` gets you a working checkout for reading and typechecking, but the test suite will not pass: gates and judges need `sh`, and timeout handling needs POSIX process groups. See [issue tracker](https://github.com/idugeni/flashover/issues) for the state of Windows support.
+
 ## Checks
 
 ```bash
@@ -22,6 +24,14 @@ bash scripts/e2e.sh  # full pipeline with mock agents, no credentials needed
 ```
 
 All three run in CI on Node 20, 22, and 24, across Linux and macOS. Run them locally before opening a PR.
+
+Whether the built-in presets still match their agent CLIs is a separate question, and the only honest way to answer it is to run the agents:
+
+```bash
+flashover doctor --verify-presets
+```
+
+That points each installed agent at a throwaway repository with a trivial task and reports which ones edited a file and exited 0. It costs tokens, so it is not in CI. If you touch a preset, this is the check that matters — asserting on `--help` text would prove nothing, since a flag can survive while its behaviour changes.
 
 Trying a change by hand:
 

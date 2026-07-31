@@ -49,14 +49,17 @@ You are not asked to review five diffs. You are handed one, with a receipt.
 
 ## Install
 
+> **Not yet published to npm.** Until the first release, install from source:
+>
+> ```bash
+> git clone https://github.com/idugeni/flashover
+> cd flashover && npm ci && npm run build && npm link
+> ```
+
+Once released:
+
 ```bash
 npm install -g flashover
-```
-
-Or run it without installing:
-
-```bash
-npx flashover "fix the flaky auth test" -a claude -g "!test:npm test"
 ```
 
 Requires Linux or macOS, Node 20.11+, git, and at least one agent CLI on your PATH. Gates and judges are shell command lines run through `sh`, so Windows is not supported — `npm install` refuses it rather than failing later at the first gate. Check your setup with:
@@ -142,6 +145,30 @@ Rules worth knowing:
 
 ---
 
+## Retune without paying twice
+
+Agents are the only step that costs money. Gates and judges are shell commands, and they are usually what you get wrong first — a weight that turns out backwards, a judge that scores everything 80, a rule you only think of after seeing the diffs.
+
+So flashover keeps every candidate's patch, and `rescore` replays them:
+
+```bash
+flashover "refactor the token parser" -a claude -n 5   # costs five agent runs
+flashover rescore -g "!test:npm test*5" -g "!no-todo:! grep -rq TODO src"   # costs nothing
+```
+
+Each stored patch is applied to a fresh worktree at the *original* base revision, then run through the current gates and judge. Same inputs, new verdict, no tokens.
+
+What it will not do is pretend the agents ran again:
+
+- Candidates that failed or produced nothing are carried over untouched. There is no patch to score, and their transcripts remain the explanation.
+- `agentDurationMs` is inherited, not remeasured. It is a ranking tie-breaker, so replacing it with however long `git apply` took would rank differently from the original run.
+- The base revision comes from the source report. A patch only means something against the commit it was taken from, and if that commit is gone, rescore says so instead of scoring against the wrong tree.
+- The report records `rescoredFrom`, so a verdict produced without agents is never mistaken for one that ran them.
+
+`flashover clean` deletes patches along with everything else in `.flashover/`. Clean and you lose the ability to rescore.
+
+---
+
 ## The judge is any command
 
 flashover has no LLM integration, no API keys, no provider SDK. A judge is a command that reads a unified diff on stdin and prints a score from 0-100.
@@ -176,9 +203,20 @@ agents:
     command: ./scripts/my-agent.sh
     args: ['--task', '{{prompt}}']
     promptMode: arg
+    # Its own limit, because one number cannot suit a hosted agent and a slow
+    # local harness at the same time.
+    timeoutMs: 3600000
 ```
 
 Mixing agents is where this gets interesting: run Claude against Codex against your own harness on the same task, and let the gates settle it.
+
+Presets encode another project's command-line flags, so they go stale. To check whether they still work rather than whether the binary merely exists:
+
+```bash
+flashover doctor --verify-presets
+```
+
+That runs each installed agent for real against a throwaway repository with a trivial task, and reports which ones edited a file and exited 0. It costs tokens, which is why it is opt-in and never part of plain `doctor`.
 
 ---
 
@@ -202,6 +240,15 @@ flashover -f task.md --promote patch --timeout 3600
 
 # Keep every worktree to inspect the losers yourself
 flashover "why is this slow" --keep all
+
+# Retune the gates against the previous run, without spending a token
+flashover rescore -g "!test:npm test*5" -g "lint:npm run lint*2"
+
+# Give a slow local harness its own time limit
+flashover "port the parser" -a claude -a my-harness   # see agents[].timeoutMs
+
+# Confirm the built-in presets still match their agent CLIs (costs tokens)
+flashover doctor --verify-presets
 ```
 
 Inline gate syntax: `[!]name:command[*weight]` — `!` marks it required, `*N` sets the weight.

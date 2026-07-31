@@ -32,6 +32,8 @@ import {
   renderMarkdownReport,
 } from './report.js';
 import { runTournament } from './tournament.js';
+import { rescoreRun } from './rescore.js';
+import { reportPresetVerification, verifyPresets } from './verify.js';
 import type { KeepMode, PromoteMode, RunReport } from './types.js';
 import { FlashoverError } from './types.js';
 import { createLiveView } from './ui.js';
@@ -48,7 +50,9 @@ ${style.bold('USAGE')}
   flashover [run] <task>              run a tournament for a task
   flashover init                      write a starter flashover.yaml
   flashover doctor                    check git, config, and installed agents
+  flashover doctor --verify-presets   run each installed agent for real, costs tokens
   flashover report [path]             re-print the leaderboard for a run
+  flashover rescore [path]            re-score a run's stored patches, no agents
   flashover clean                     remove worktrees and run artifacts
 
 ${style.bold('EXAMPLES')}
@@ -60,6 +64,9 @@ ${style.bold('EXAMPLES')}
 
   ${style.gray('# weighted gates: tests matter 5x more than lint')}
   flashover "refactor the parser" -g "!test:npm test*5" -g "lint:npm run lint"
+
+  ${style.gray('# retune gates against the last run, without paying for agents again')}
+  flashover rescore -g "!test:npm test*5" -g "lint:npm run lint*2"
 
 ${style.bold('RUN OPTIONS')}
   -a, --agent <name[:count]>   agent preset, repeatable (e.g. claude, codex:2)
@@ -84,6 +91,7 @@ ${style.bold('OUTPUT OPTIONS')}
       --json                   print the run report as JSON on stdout
       --markdown               print a markdown summary on stdout
       --no-live                disable the in-place live view
+      --force                  overwrite an existing config (init only)
   -q, --quiet                  errors only
   -v, --verbose                include debug output
   -h, --help                   show this help
@@ -96,6 +104,9 @@ ${style.bold('HOW IT WORKS')}
   Each candidate runs in its own detached git worktree, so agents never see or
   clobber each other. The diff is captured before any gate runs, then gates score
   it. The winner becomes a branch; your working tree is never touched.
+
+  Agents are the only step that costs money, so their diffs are kept. ${style.bold('rescore')}
+  replays them against changed gates or a changed judge, free of charge.
 
 Docs: https://github.com/idugeni/flashover
 `;
@@ -127,14 +138,15 @@ const OPTION_SPEC = {
   json: { type: 'boolean' },
   markdown: { type: 'boolean' },
   'no-live': { type: 'boolean' },
-  all: { type: 'boolean' },
+  force: { type: 'boolean' },
+  'verify-presets': { type: 'boolean' },
   quiet: { type: 'boolean', short: 'q' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean' },
 } as const;
 
-const KNOWN_COMMANDS = new Set(['run', 'init', 'doctor', 'report', 'clean', 'help', 'version']);
+const KNOWN_COMMANDS = new Set(['run', 'init', 'doctor', 'report', 'rescore', 'clean', 'help', 'version']);
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ParsedCli;
@@ -177,6 +189,8 @@ async function main(argv: readonly string[]): Promise<number> {
       return commandDoctor(parsed);
     case 'report':
       return commandReport(parsed);
+    case 'rescore':
+      return commandRescore(parsed);
     case 'clean':
       return commandClean(parsed);
     case 'run':
@@ -305,7 +319,11 @@ function printPlan(config: ReturnType<typeof resolveConfig>): void {
   log.info(`  base         ${config.baseRef}`);
   log.info(`  candidates   ${config.candidates} (concurrency ${config.concurrency})`);
   for (const entry of config.roster) {
-    log.info(`  agent        ${entry.agent.name} ×${entry.count} — ${[entry.agent.command, ...entry.agent.args].join(' ')}`);
+    const timeout =
+      entry.agent.timeoutMs === undefined ? '' : ` ${style.gray(`[timeout ${Math.round(entry.agent.timeoutMs / 1000)}s]`)}`;
+    log.info(
+      `  agent        ${entry.agent.name} ×${entry.count} — ${[entry.agent.command, ...entry.agent.args].join(' ')}${timeout}`,
+    );
   }
   for (const gate of config.setupGates) {
     log.info(`  setup        ${gate.name}: ${gate.run}`);
@@ -348,9 +366,9 @@ async function commandInit(cli: ParsedCli): Promise<number> {
   const repoRoot = await git.findRepoRoot(cwd);
   const target = join(repoRoot, 'flashover.yaml');
 
-  if (existsSync(target) && cli.values['all'] !== true) {
+  if (existsSync(target) && cli.values['force'] !== true) {
     log.error(`${target} already exists.`);
-    log.info('  Delete it first, or edit it directly.');
+    log.info(`  Pass ${style.bold('--force')} to overwrite it, or edit it directly.`);
     return EXIT_USAGE;
   }
 
@@ -531,6 +549,16 @@ async function commandDoctor(cli: ParsedCli): Promise<number> {
   let problems = 0;
   const cwd = currentDir();
 
+  // Opt-in because it invokes real agents and spends real money. Runs first so a
+  // long verification is not preceded by output the user has to scroll past.
+  if (cli.values['verify-presets'] === true) {
+    const only = cli.positionals.length > 0 ? cli.positionals : undefined;
+    const results = await verifyPresets(only === undefined ? {} : { only });
+    const failures = reportPresetVerification(results);
+    log.blank();
+    return failures === 0 ? EXIT_OK : EXIT_USAGE;
+  }
+
   log.info(style.bold('environment'));
   log.info(`  flashover    ${await readVersion()}`);
   log.info(`  node         ${process.version}`);
@@ -633,24 +661,28 @@ async function commandDoctor(cli: ParsedCli): Promise<number> {
 
 /* --------------------------------------------------------------- report --- */
 
+/**
+ * Resolve which report to read: an explicit path or directory, else the newest
+ * run. Shared by `report` and `rescore`, which address runs the same way.
+ */
+async function resolveReportPath(cli: ParsedCli, cwd: string, repoRoot: string): Promise<string> {
+  const explicit = cli.positionals[0];
+  if (explicit !== undefined) {
+    const candidate = isAbsolute(explicit) ? explicit : resolve(cwd, explicit);
+    return candidate.endsWith('.json') ? candidate : join(candidate, REPORT_FILENAME);
+  }
+
+  const latest = await findLatestRunDir(join(repoRoot, '.flashover'));
+  if (latest === null) {
+    throw new FlashoverError('No previous runs found.', 'Run flashover first.');
+  }
+  return join(latest, REPORT_FILENAME);
+}
+
 async function commandReport(cli: ParsedCli): Promise<number> {
   const cwd = currentDir();
   const repoRoot = await git.findRepoRoot(cwd);
-  const explicit = cli.positionals[0];
-
-  let reportPath: string;
-  if (explicit !== undefined) {
-    const candidate = isAbsolute(explicit) ? explicit : resolve(cwd, explicit);
-    reportPath = candidate.endsWith('.json') ? candidate : join(candidate, REPORT_FILENAME);
-  } else {
-    const latest = await findLatestRunDir(join(repoRoot, '.flashover'));
-    if (latest === null) {
-      log.error('No previous runs found.');
-      log.info('  Run flashover first.');
-      return EXIT_USAGE;
-    }
-    reportPath = join(latest, REPORT_FILENAME);
-  }
+  const reportPath = await resolveReportPath(cli, cwd, repoRoot);
 
   const report = await readReport(reportPath);
 
@@ -670,6 +702,79 @@ async function commandReport(cli: ParsedCli): Promise<number> {
     }
     if (report.promotedBranch !== null) log.info(`branch: ${report.promotedBranch}`);
     if (report.promotedPatch !== null) log.info(`patch:  ${report.promotedPatch}`);
+  }
+
+  return report.winnerId === null ? EXIT_NO_WINNER : EXIT_OK;
+}
+
+/* -------------------------------------------------------------- rescore --- */
+
+/**
+ * Re-verify a previous run's stored patches against the current gates.
+ *
+ * The task comes from the source report rather than the command line: no agent
+ * runs, so asking the user to restate the task would invite a mismatch between
+ * the prompt in the report and the diffs it describes.
+ */
+async function commandRescore(cli: ParsedCli): Promise<number> {
+  const cwd = currentDir();
+  const repoRoot = await git.findRepoRoot(cwd);
+
+  const source = await readReport(await resolveReportPath(cli, cwd, repoRoot));
+
+  const configPath = resolveConfigPath(cli, cwd, repoRoot);
+  const rawConfig = configPath === null ? {} : loadConfigFile(configPath);
+  if (configPath !== null) log.debug(`Using config ${configPath}`);
+
+  const overrides = buildOverrides(cli);
+  // Inherited, never overridden: the diffs under test were produced for this task.
+  overrides.prompt = source.prompt;
+
+  const config = resolveConfig(rawConfig, overrides, {
+    repoRoot,
+    configDir: configPath === null ? repoRoot : dirname(configPath),
+  });
+
+  if (cli.values['dry-run'] === true) {
+    log.info(style.bold(`Would rescore run ${source.runId}`));
+    log.info(`  base         ${source.baseSha.slice(0, 12)}`);
+    log.info(`  patches      ${source.candidates.filter((c) => c.patchPath !== null).length}`);
+    printPlan(config);
+    return EXIT_OK;
+  }
+
+  const controller = new AbortController();
+  const onSigint = (): void => {
+    log.blank();
+    log.warn('Interrupted. Stopping gates...');
+    controller.abort();
+  };
+  process.on('SIGINT', onSigint);
+
+  const view = createLiveView(cli.values['no-live'] === true);
+
+  let report: RunReport;
+  try {
+    report = await rescoreRun({
+      config,
+      source,
+      runId: makeRunId(),
+      onEvent: (event) => view.handle(event),
+      signal: controller.signal,
+    });
+  } finally {
+    view.stop();
+    process.off('SIGINT', onSigint);
+  }
+
+  if (cli.values['json'] === true) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else if (cli.values['markdown'] === true) {
+    process.stdout.write(`${renderMarkdownReport(report)}\n`);
+  } else {
+    log.blank();
+    log.info(style.gray(`rescored from run ${source.runId} — no agents were invoked`));
+    printRunSummary(report, config.minScore);
   }
 
   return report.winnerId === null ? EXIT_NO_WINNER : EXIT_OK;

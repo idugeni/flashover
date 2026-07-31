@@ -35,8 +35,13 @@ export interface ExecOptions {
   env?: Readonly<Record<string, string | undefined>>;
   /** Kill the process tree after this many milliseconds. Omit for no limit. */
   timeoutMs?: number;
-  /** Written to stdin, which is then closed. When omitted, stdin is /dev/null. */
-  input?: string;
+  /**
+   * Written to stdin, which is then closed. When omitted, stdin is /dev/null.
+   *
+   * Accepts a Buffer so callers that must deliver bytes untouched — a patch fed
+   * to a judge, for instance — are not forced through a UTF-8 round trip.
+   */
+  input?: string | Buffer;
   /** Streaming hook, called with each decoded stdout chunk. */
   onStdout?: (chunk: string) => void;
   /** Streaming hook, called with each decoded stderr chunk. */
@@ -251,7 +256,8 @@ function run(command: string, args: readonly string[], useShell: boolean, option
       child.stdin.on('error', () => {
         // The child may exit before reading stdin; EPIPE here is not fatal.
       });
-      child.stdin.end(options.input, 'utf8');
+      if (typeof options.input === 'string') child.stdin.end(options.input, 'utf8');
+      else child.stdin.end(options.input);
     }
   });
 }

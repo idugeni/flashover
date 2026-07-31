@@ -101,6 +101,30 @@ describe('resolveAgent', () => {
     const { agent } = resolveAgent({ command: './run.sh', args: [], promptMode: 'stdin' });
     assert.equal(agent.promptMode, 'stdin');
   });
+
+  it('carries a per-agent timeout through', () => {
+    const { agent } = resolveAgent({ preset: 'claude', timeoutMs: 90_000 });
+    assert.equal(agent.timeoutMs, 90_000);
+  });
+
+  it('leaves the timeout unset so the run-wide default applies', () => {
+    assert.equal(resolveAgent('claude').agent.timeoutMs, undefined);
+  });
+
+  it('floors a fractional timeout', () => {
+    assert.equal(resolveAgent({ preset: 'claude', timeoutMs: 1500.7 }).agent.timeoutMs, 1500);
+  });
+
+  it('rejects a non-positive per-agent timeout', () => {
+    // A zero or negative limit would either kill instantly or mean nothing;
+    // neither is a plausible intent worth guessing at.
+    for (const timeoutMs of [0, -1]) {
+      assert.throws(
+        () => resolveAgent({ preset: 'claude', timeoutMs }),
+        (err: unknown) => err instanceof FlashoverError && /invalid timeoutMs/.test(err.message),
+      );
+    }
+  });
 });
 
 describe('substitutePlaceholders', () => {

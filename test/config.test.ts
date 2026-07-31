@@ -274,6 +274,34 @@ describe('inline agent syntax', () => {
       (err: unknown) => err instanceof FlashoverError && /Unknown agent preset/.test(err.message),
     );
   });
+
+  it('keeps agents with different timeouts as separate roster entries', () => {
+    // Merging these would apply one agent's limit to the other, quietly undoing
+    // the only reason to set a per-agent timeout in the first place.
+    const config = resolve({
+      ...BASE,
+      agents: [
+        { preset: 'claude', timeoutMs: 60_000 },
+        { preset: 'claude', timeoutMs: 600_000 },
+      ],
+    });
+
+    assert.equal(config.roster.length, 2);
+    assert.equal(config.candidates, 2);
+  });
+
+  it('still merges identical agents that share a timeout', () => {
+    const config = resolve({
+      ...BASE,
+      agents: [
+        { preset: 'claude', timeoutMs: 60_000 },
+        { preset: 'claude', timeoutMs: 60_000 },
+      ],
+    });
+
+    assert.equal(config.roster.length, 1);
+    assert.equal(config.roster[0]?.count, 2);
+  });
 });
 
 describe('seed resolution', () => {

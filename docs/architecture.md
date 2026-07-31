@@ -11,6 +11,8 @@ cli.ts          argument parsing, subcommands, exit codes
     agent.ts    agent invocation, transcript capture
     gates.ts    gate battery, judge invocation
     score.ts    weighted scoring, ranking, winner selection
+  rescore.ts    re-verification of a previous run's stored patches
+  verify.ts     behavioural probe of the built-in agent presets
   report.ts     report.json persistence, leaderboard rendering
   ui.ts         live terminal view
   exec.ts       process spawning: timeouts, process-group kills, output caps
@@ -20,6 +22,8 @@ index.ts        programmatic API
 ```
 
 Dependencies point downward only. `tournament.ts` is the single place that understands candidate lifecycle; everything below it is independently testable.
+
+`rescore.ts` sits beside `tournament.ts` rather than inside it. The two share everything after a diff exists — gates, judge, scoring, promotion, cleanup — and differ only in where the diff comes from: an agent, or a patch on disk. The orchestration skeleton is short enough that duplicating it costs less than an abstraction serving both. What it does not duplicate is `promoteWinner` and `cleanupWorktrees`, which are imported, because those encode user-visible policy and two copies would drift.
 
 ## Data flow
 
@@ -91,6 +95,10 @@ The run already produced its verdict. Leftover directories are recoverable with 
 ### 10. Binary lookup never depends on a shell
 
 `commandExists` resolves PATH in-process. Delegating to `sh -c "command -v"` meant that on a machine without `sh`, every binary was reported missing — including git, on the same `doctor` run that had just used git to locate the repository. A diagnostic that contradicts itself is worse than no diagnostic.
+
+### 11. A rescore never fabricates what only an agent could produce
+
+`rescore` recomputes gates, judge, score, and diff, because those are functions of the current configuration. It inherits the task, the base revision, agent exit status, timings, and transcripts, because those are facts about a run that already happened. `agentDurationMs` is the sharp edge: it is a ranking tie-breaker, so substituting `git apply`'s runtime would make a rescored leaderboard break ties differently from the run it claims to re-examine. Reports produced this way carry `rescoredFrom` so the distinction survives into anything reading them.
 
 ---
 

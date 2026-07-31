@@ -496,6 +496,7 @@ function mergeRoster(entries: Array<{ agent: RosterEntry['agent']; count: number
       (candidate) =>
         candidate.agent.name === entry.agent.name &&
         candidate.agent.command === entry.agent.command &&
+        candidate.agent.timeoutMs === entry.agent.timeoutMs &&
         candidate.agent.args.join('\u0000') === entry.agent.args.join('\u0000'),
     );
     if (existing === undefined) {

@@ -35,6 +35,15 @@ export interface AgentDefinition {
   promptMode: PromptMode;
   /** Extra environment variables layered on top of the parent process env. */
   env?: Readonly<Record<string, string>>;
+  /**
+   * Per-agent time limit, overriding the run-wide `agentTimeoutMs`.
+   *
+   * A single global limit cannot serve a mixed roster: the value that keeps a
+   * fast hosted agent honest is far too tight for a slow local harness, and the
+   * value that accommodates the harness lets a wedged agent hold the tournament
+   * open for the full duration.
+   */
+  timeoutMs?: number;
   /** Optional docs link, surfaced by `flashover doctor`. */
   docs?: string;
 }
@@ -140,6 +149,8 @@ export interface AgentConfigInput {
   args?: string[];
   promptMode?: PromptMode;
   env?: Record<string, string>;
+  /** Per-agent time limit in milliseconds. Falls back to `agentTimeoutMs`. */
+  timeoutMs?: number;
   /** Run this many copies of the agent. Defaults to 1. */
   count?: number;
 }
@@ -281,6 +292,14 @@ export interface RunReport {
   winnerId: string | null;
   promotedBranch: string | null;
   promotedPatch: string | null;
+  /**
+   * Run id this report was rescored from, when produced by `flashover rescore`.
+   *
+   * Absent for a normal run. Its presence means no agent was invoked: the
+   * candidates' stored patches were re-verified against the current gates, so
+   * the agent timings and transcripts are inherited from the source run.
+   */
+  rescoredFrom?: string;
 }
 
 /** Thrown for user-facing problems: bad config, dirty repo, missing binary. */

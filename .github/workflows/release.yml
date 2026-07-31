@@ -1,0 +1,68 @@
+name: release
+
+# Releases are cut from a tag, never from a branch. The tag is the record of what
+# was published, and it has to be able to disagree with nothing.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for provenance. The OIDC token is what lets npm attest that this
+      # tarball came from this workflow, on this commit, rather than from someone's
+      # laptop.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Refuse a tag that disagrees with package.json
+        # A mismatch here means the published version would not be the version the
+        # tag names, which is unfixable after the fact: npm does not allow reusing
+        # a version number.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag ${tag} does not match package.json version ${manifest}" >&2
+            exit 1
+          fi
+          echo "releasing ${manifest}"
+
+      - name: Configure git identity
+        # The git integration tests create real repositories and commits.
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+
+      - run: npm ci
+
+      # The full battery again. Tagging a commit is not evidence that the commit
+      # was ever verified, and a bad publish cannot be taken back.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: bash scripts/e2e.sh
+
+      - name: Verify the CLI starts from the build output
+        run: |
+          node dist/cli.js --version
+          node dist/cli.js --help > /dev/null
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

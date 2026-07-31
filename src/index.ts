@@ -49,6 +49,12 @@ export { PRESETS, presetNames, resolveAgent, substitutePlaceholders } from './pr
 export type { TournamentEvent, TournamentOptions } from './tournament.js';
 export { runTournament } from './tournament.js';
 
+export type { RescoreOptions } from './rescore.js';
+export { rescoreRun } from './rescore.js';
+
+export type { PresetVerification, VerifyPresetsOptions } from './verify.js';
+export { reportPresetVerification, verifyPresets } from './verify.js';
+
 export type { ScoreInput } from './score.js';
 export { compareCandidates, computeScore, isRankable, pickWinner, rankCandidates, totalConfiguredWeight } from './score.js';
 

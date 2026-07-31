@@ -28,7 +28,19 @@ First release.
 - **Worktree seeding.** `seed.copy` and `seed.link` materialize gitignored build
   inputs such as `node_modules` inside fresh worktrees.
 - **Subcommands.** `run`, `init` (detects gates from `package.json`,
-  `Cargo.toml`, `go.mod`, `pyproject.toml`), `doctor`, `report`, `clean`.
+  `Cargo.toml`, `go.mod`, `pyproject.toml`), `doctor`, `report`, `rescore`,
+  `clean`.
+- **`rescore`.** Re-verify a previous run's stored patches against the current
+  gates and judge, without invoking an agent. Agents are the only step that
+  costs money, so retuning what ranks their output should be free. Inherits the
+  task, base revision, and agent timings from the source run; records
+  `rescoredFrom`.
+- **Per-agent timeouts.** `agents[].timeoutMs` overrides the run-wide
+  `agentTimeoutMs`, because one limit cannot serve both a hosted agent and a
+  slow local harness.
+- **`doctor --verify-presets`.** Runs each installed agent against a throwaway
+  repository with a trivial task and reports which ones still work. Opt-in: it
+  spends real tokens, and checking `--help` text instead would prove nothing.
 - **Machine-readable reports.** `report.json` per run, plus `--json` and
   `--markdown` output for CI summaries. Logs go to stderr so stdout stays
   pipeable.

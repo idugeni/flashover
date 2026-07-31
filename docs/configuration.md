@@ -113,7 +113,10 @@ An entry is either a preset name or an object:
 | `args` | string[] | Argument list, with `{{placeholder}}` support. |
 | `promptMode` | enum | `arg`, `stdin`, or `file`. |
 | `env` | object | Extra environment variables. |
+| `timeoutMs` | number | Time limit for this agent, overriding `agentTimeoutMs`. |
 | `count` | number | Copies to run. Default `1`. |
+
+A per-agent `timeoutMs` exists because a single run-wide limit cannot serve a mixed roster: the value that keeps a hosted agent honest is far too tight for a slow local harness, and the value that accommodates the harness lets a wedged agent hold the tournament open for twenty minutes. Agents that differ only by timeout stay separate roster entries rather than being merged, so the limit you set is the limit that applies.
 
 ### Placeholders
 
@@ -267,6 +270,22 @@ If a seeded path is tracked by git, flashover warns: the exclusion would discard
 | `-c, --config <path>` | config file to load |
 | `--json` / `--markdown` | report format on stdout |
 | `--no-live` | disable the in-place view |
+| `--force` | overwrite an existing config (`init` only) |
+| `--verify-presets` | run each installed agent for real (`doctor` only, costs tokens) |
 | `-q, --quiet` / `-v, --verbose` | log level |
 
 Passing both a task argument and `--prompt-file` is an error. Guessing which one you meant is worse than asking.
+
+## Rescoring a previous run
+
+`flashover rescore [path]` re-verifies a run's stored patches against the *current* gates and judge, without invoking any agent. It addresses runs exactly as `report` does: an explicit run directory or `report.json`, or the newest run when omitted.
+
+Every flag above still applies, and the gates and judge you pass are the point of the exercise. Three things are deliberately not taken from your current configuration:
+
+- **The task.** Inherited from the source report, because the diffs under test were produced for that task. There is nothing to gain from restating it and a mismatch to lose.
+- **The base revision.** Also inherited. A patch is only meaningful against the commit it was recorded against, and if that commit no longer exists the rescore fails rather than scoring against the wrong tree.
+- **Agent timings and transcripts.** Carried over per candidate. `agentDurationMs` is a ranking tie-breaker, so substituting however long `git apply` took would make a rescored leaderboard break ties differently from the original.
+
+Candidates with no stored patch — `no-changes`, `agent-failed`, `error` — are carried into the new report unchanged and stay unrankable. The resulting report carries `rescoredFrom`, naming the run it came from.
+
+Since patches live under `.flashover/`, `flashover clean` removes the ability to rescore.

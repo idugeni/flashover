@@ -58,6 +58,11 @@ describe('worktree lifecycle', () => {
     await run(['init', '-b', 'main']);
     await run(['config', 'user.name', 'Test User']);
     await run(['config', 'user.email', 'test@example.com']);
+    // Pinned so the fixture behaves the same regardless of the developer's global
+    // git configuration. With autocrlf enabled, checked-out and patched files come
+    // back CRLF-converted and byte-level assertions become machine-dependent.
+    await run(['config', 'core.autocrlf', 'false']);
+    await run(['config', 'core.eol', 'lf']);
     await writeFile(join(repoRoot, 'app.txt'), 'original\n', 'utf8');
     // Directory-only pattern, matching the overwhelmingly common real-world form
     // (`node_modules/`). Its interaction with symlinked seeds is tested below.
@@ -310,6 +315,56 @@ describe('worktree lifecycle', () => {
     assert.equal(stat.filesChanged, fileCount);
     assert.equal(stat.insertions, fileCount);
     assert.equal(stat.deletions, 0);
+
+    await git.removeWorktree(repoRoot, worktreePath);
+  });
+
+  it('replays an exported patch into a fresh worktree', async () => {
+    // The round trip `rescore` depends on: a stored patch must reproduce the
+    // candidate's tree exactly when applied to the base it was taken from.
+    const source = join(repoRoot, '.flashover', 'test-run', 'c10');
+    await git.addWorktree(repoRoot, source, baseSha);
+    await writeFile(join(source, 'app.txt'), 'original\nfrom the agent\n', 'utf8');
+    await writeFile(join(source, 'added.txt'), 'new file\n', 'utf8');
+    await git.stageAll(source);
+
+    const patchPath = join(repoRoot, '.flashover', 'test-run', 'patches', 'c10.patch');
+    await git.exportStagedPatch(source, patchPath);
+    const expected = await git.stagedDiffStat(source);
+
+    // Deliberately gone before the replay: rescore runs long after the original
+    // worktree was cleaned up, so the patch has to stand on its own.
+    await git.removeWorktree(repoRoot, source);
+
+    const replay = join(repoRoot, '.flashover', 'test-run', 'c11');
+    await git.addWorktree(repoRoot, replay, baseSha);
+    await git.applyPatch(replay, patchPath);
+    await git.stageAll(replay);
+
+    assert.equal(await readFile(join(replay, 'app.txt'), 'utf8'), 'original\nfrom the agent\n');
+    assert.equal(await readFile(join(replay, 'added.txt'), 'utf8'), 'new file\n');
+    assert.deepEqual(await git.stagedDiffStat(replay), expected, 'replayed diff must match the original');
+
+    await git.removeWorktree(repoRoot, replay);
+  });
+
+  it('reports a patch that no longer applies instead of half-applying it', async () => {
+    const worktreePath = join(repoRoot, '.flashover', 'test-run', 'c12');
+    await git.addWorktree(repoRoot, worktreePath, baseSha);
+
+    // Targets a file that does not exist at this base revision, which is what a
+    // patch recorded against a different revision looks like.
+    const bogus = join(repoRoot, '.flashover', 'test-run', 'bogus.patch');
+    await writeFile(
+      bogus,
+      ['diff --git a/missing.txt b/missing.txt', '--- a/missing.txt', '+++ b/missing.txt', '@@ -1 +1 @@', '-nope', '+yep', ''].join('\n'),
+      'utf8',
+    );
+
+    await assert.rejects(
+      git.applyPatch(worktreePath, bogus),
+      (err: unknown) => err instanceof FlashoverError && /does not apply/.test(err.message),
+    );
 
     await git.removeWorktree(repoRoot, worktreePath);
   });

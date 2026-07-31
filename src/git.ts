@@ -73,7 +73,11 @@ export async function findRepoRoot(cwd: string): Promise<string> {
     );
   }
 
-  const root = probe.stdout.trim();
+  // Normalized to the platform's own separators. git reports POSIX-style paths
+  // even on Windows, and this value is compared against paths derived from Node
+  // (`realpathSync`, `join`) and printed to the user, so leaving it in git's
+  // dialect produces both mismatched comparisons and `C:/mixed\output`.
+  const root = resolve(probe.stdout.trim());
   const head = await git(['rev-parse', '--verify', 'HEAD'], root);
   if (!succeeded(head)) {
     throw new FlashoverError(
@@ -260,6 +264,30 @@ export async function isPathTracked(repoRoot: string, relativePath: string): Pro
 /** Stage every change in a worktree, including untracked and deleted files. */
 export async function stageAll(worktreePath: string): Promise<void> {
   await gitOrThrow(['add', '-A'], worktreePath, GIT_SLOW_TIMEOUT_MS);
+}
+
+/**
+ * Apply a previously exported patch inside a worktree.
+ *
+ * Used by `rescore` to reconstruct a candidate's result without paying for the
+ * agent again. `--binary` matches how the patch was produced; without it a patch
+ * touching binary assets would be refused.
+ *
+ * A failure here is a real answer, not an infrastructure fault: it means the
+ * stored patch no longer applies to the base revision it was recorded against.
+ */
+export async function applyPatch(worktreePath: string, patchPath: string): Promise<void> {
+  const result = await git(
+    ['apply', '--binary', '--whitespace=nowarn', patchPath],
+    worktreePath,
+    GIT_SLOW_TIMEOUT_MS,
+  );
+  if (!succeeded(result)) {
+    throw new FlashoverError(
+      `Stored patch does not apply: ${patchPath} (${describeFailure(result)}).`,
+      result.stderr.trim() || 'The patch was recorded against a different base revision.',
+    );
+  }
 }
 
 /**

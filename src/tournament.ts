@@ -191,7 +191,9 @@ async function runCandidate(args: RunCandidateArgs): Promise<void> {
     runId: args.runId,
     logPath: plan.logPath,
     scratchDir: args.scratchDir,
-    timeoutMs: config.agentTimeoutMs,
+    // A per-agent limit wins over the run-wide one, so a slow local harness and a
+    // fast hosted agent can share a roster without one of them being misjudged.
+    timeoutMs: plan.agent.timeoutMs ?? config.agentTimeoutMs,
     ...(args.signal !== undefined ? { signal: args.signal } : {}),
   });
 
@@ -263,8 +265,9 @@ async function runCandidate(args: RunCandidateArgs): Promise<void> {
   if (config.judge !== null && battery.eliminatedBy === null) {
     // Skip the judge for eliminated candidates: it usually costs money and
     // cannot change the outcome.
-    const patchText = await readFile(plan.patchPath, 'utf8');
-    const outcome = await runJudge(config.judge, patchText, gateCtx);
+    // Read as bytes so the judge sees the patch exactly as git wrote it.
+    const patchBytes = await readFile(plan.patchPath);
+    const outcome = await runJudge(config.judge, patchBytes, gateCtx);
     judgeScore = outcome.score;
   }
 
@@ -346,8 +349,11 @@ function buildCommitMessage(prompt: string, plan: CandidatePlan): string {
  * Branch mode writes a ref at the candidate's commit. Because worktrees share
  * one object database, the commit survives worktree removal, and the user's
  * working tree and index are never touched.
+ *
+ * Exported because `rescore` promotes by the same rules; duplicating the
+ * `none` / `patch` / `branch` semantics would let the two commands drift.
  */
-async function promoteWinner(
+export async function promoteWinner(
   config: ResolvedConfig,
   winner: CandidateResult,
 ): Promise<{ branch: string | null; patch: string | null }> {
@@ -378,10 +384,13 @@ async function promoteWinner(
  *
  * Failures here are logged but never fatal: the run already produced its result,
  * and leftover directories are recoverable with `flashover clean`.
+ *
+ * Takes the minimum shape it needs rather than a full plan, so `rescore` can
+ * reuse it with its own plan type.
  */
-async function cleanupWorktrees(
+export async function cleanupWorktrees(
   config: ResolvedConfig,
-  plans: readonly CandidatePlan[],
+  plans: readonly { id: string; worktreePath: string }[],
   winnerId: string | null,
 ): Promise<void> {
   if (config.keep === 'all') return;

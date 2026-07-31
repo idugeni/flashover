@@ -115,6 +115,9 @@ export interface JudgeOutcome {
  * be an LLM call, a heuristic script, a static analyzer, or a coin flip, with no
  * provider integration in this codebase.
  *
+ * The diff is delivered as the exact bytes written to the patch file, not a
+ * decoded copy, so what the judge scores is what `git apply` would consume.
+ *
  * Accepted output formats, checked in order:
  *  - JSON object anywhere in stdout containing a numeric `score` field
  *  - a bare number on the last non-empty line
@@ -124,13 +127,13 @@ export interface JudgeOutcome {
  */
 export async function runJudge(
   judge: JudgeDefinition,
-  patchText: string,
+  patch: Buffer | string,
   ctx: GateRunContext,
 ): Promise<JudgeOutcome> {
   const result = await execShell(judge.run, {
     cwd: ctx.worktreePath,
     timeoutMs: judge.timeoutMs,
-    input: patchText,
+    input: patch,
     env: {
       ...(judge.env ?? {}),
       FLASHOVER: '1',

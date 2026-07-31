@@ -301,6 +301,149 @@ check "promote none: nothing advertised"   "null" "$(report_field "$NONE_REPORT"
 check "promote none: still names a winner" "c1"   "$(report_field "$NONE_REPORT" winnerId)"
 check "promote none: creates no branch" "$BRANCHES_BEFORE" "$(git branch --list | wc -l | tr -d ' ')"
 
+# --------------------------------------------------------- keep policies
+
+# Which worktrees survive is a documented promise, and the only one a user can
+# check by looking at their disk.
+echo
+echo "keep policies:"
+
+reset_artifacts() {
+  rm -rf "$REPO/.flashover"
+  # Without this, worktrees registered by a previous run linger as dangling
+  # entries and `git worktree add` refuses the same path next time.
+  git worktree prune
+}
+
+count_worktrees() {
+  find "$REPO/.flashover" -maxdepth 2 -name 'c[0-9]*' -type d 2>/dev/null | wc -l | tr -d ' '
+}
+
+reset_artifacts
+node "$CLI" "make add 2 3 return 5" --no-live --keep none > /dev/null 2>&1
+check "keep none: nothing survives" "0" "$(count_worktrees)"
+
+reset_artifacts
+node "$CLI" "make add 2 3 return 5" --no-live --keep winner > /dev/null 2>&1
+check "keep winner: exactly one survives" "1" "$(count_worktrees)"
+check "keep winner: and it is the winner" "c1" \
+  "$(basename "$(find "$REPO/.flashover" -maxdepth 2 -name 'c[0-9]*' -type d 2>/dev/null | head -1)")"
+
+reset_artifacts
+node "$CLI" "make add 2 3 return 5" --no-live --keep all > /dev/null 2>&1
+check "keep all: every worktree survives" "4" "$(count_worktrees)"
+
+# --------------------------------------------------------------- rescore
+
+# The premise: agents are the expensive step, so their diffs are replayable.
+# A rescore must reach a verdict from stored patches alone, without invoking a
+# single agent, and must not pretend the agents ran again.
+echo
+echo "rescore:"
+
+# Read a field from one candidate, addressed by id and a dotted path. Names are
+# passed as argv rather than interpolated into JS, so no shell quoting can leak
+# into code.
+candidate_field() {
+  node -e '
+    const report = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const candidate = report.candidates.find((entry) => entry.id === process.argv[2]);
+    const value = process.argv[3].split(".").reduce((acc, key) => (acc == null ? acc : acc[key]), candidate);
+    process.stdout.write(value === null || value === undefined ? "null" : String(value));
+  ' "$1" "$2" "$3"
+}
+
+reset_artifacts
+node "$CLI" "make add 2 3 return 5" --no-live --keep none > /dev/null 2>&1
+SOURCE_REPORT="$(latest_report)"
+SOURCE_RUN="$(report_field "$SOURCE_REPORT" runId)"
+SOURCE_DIR="$(dirname "$SOURCE_REPORT")"
+
+check "source run promoted c1" "c1" "$(report_field "$SOURCE_REPORT" winnerId)"
+# `--keep none` deletes worktrees but must leave patches, or rescore is impossible.
+check "patches outlive keep none" "yes" "$([ -f "$SOURCE_DIR/patches/c1.patch" ] && echo yes || echo no)"
+
+# Re-score with no-todo promoted to a required gate. c2 fixed the bug but left a
+# TODO, so a rule change alone should now eliminate it — no agent re-run needed.
+set +e
+node "$CLI" rescore --no-live --keep none \
+  -g 'test:sh ./test.sh*5' \
+  -g '!no-todo:! grep -q TODO calc.sh' > /dev/null 2>&1
+RESCORE_EXIT=$?
+set -e
+check "exit code 0 (winner promoted)" "0" "$RESCORE_EXIT"
+
+RESCORE_REPORT="$(latest_report)"
+check "wrote a new report" "yes" "$([ "$RESCORE_REPORT" != "$SOURCE_REPORT" ] && echo yes || echo no)"
+check "records the source run" "$SOURCE_RUN" "$(report_field "$RESCORE_REPORT" rescoredFrom)"
+check "inherits the original task" "make add 2 3 return 5" "$(report_field "$RESCORE_REPORT" prompt)"
+check "reuses the source base sha" "$(report_field "$SOURCE_REPORT" baseSha)" "$(report_field "$RESCORE_REPORT" baseSha)"
+
+# No agents ran, so verdicts that came from the agent itself are carried over
+# untouched rather than recomputed.
+check "c3 stays no-changes" "no-changes" "$(candidate_field "$RESCORE_REPORT" c3 status)"
+check "c4 stays agent-failed" "agent-failed" "$(candidate_field "$RESCORE_REPORT" c4 status)"
+
+# The point of the exercise: the new rule changes the outcome.
+check "c2 now eliminated by the required gate" "eliminated" "$(candidate_field "$RESCORE_REPORT" c2 status)"
+check "c2 was merely scored before" "scored" "$(candidate_field "$SOURCE_REPORT" c2 status)"
+check "c1 still wins" "c1" "$(report_field "$RESCORE_REPORT" winnerId)"
+
+# Ranking tie-breakers use agent duration, so a rescore that replaced it with
+# git's own runtime would silently rank differently from the original.
+check "c1 agent duration inherited" \
+  "$(candidate_field "$SOURCE_REPORT" c1 agentDurationMs)" \
+  "$(candidate_field "$RESCORE_REPORT" c1 agentDurationMs)"
+check "c1 transcript still points at the agent run" \
+  "$(candidate_field "$SOURCE_REPORT" c1 logPath)" \
+  "$(candidate_field "$RESCORE_REPORT" c1 logPath)"
+
+# Replaying the patch must reproduce the diff it was taken from.
+check "c1 diff reproduced: files" \
+  "$(candidate_field "$SOURCE_REPORT" c1 diff.filesChanged)" \
+  "$(candidate_field "$RESCORE_REPORT" c1 diff.filesChanged)"
+check "c1 diff reproduced: insertions" \
+  "$(candidate_field "$SOURCE_REPORT" c1 diff.insertions)" \
+  "$(candidate_field "$RESCORE_REPORT" c1 diff.insertions)"
+
+check "the rescored branch fixes the bug" "0" "$(
+  branch="$(report_field "$RESCORE_REPORT" promotedBranch)"
+  git worktree add -q --detach "$WORK/rescored" "$branch"
+  (cd "$WORK/rescored" && sh test.sh > /dev/null 2>&1; echo $?)
+)"
+git worktree remove --force "$WORK/rescored"
+
+# ---------------------------------------------------------------- seeding
+
+# Fresh worktrees hold only tracked files, so gitignored build inputs have to be
+# materialized — and must not then be mistaken for the agent's work.
+echo
+echo "seeding:"
+
+mkdir -p "$REPO/vendor"
+echo "dependency" > "$REPO/vendor/dep.txt"
+echo "vendor/" > "$REPO/.gitignore"
+git add .gitignore
+git commit -q -m "ignore vendor"
+
+reset_artifacts
+node "$CLI" "make add 2 3 return 5" --no-live --keep none --seed-copy vendor \
+  -g '!test:sh ./test.sh*5' \
+  -g 'seeded:test -f vendor/dep.txt' > /dev/null 2>&1
+SEED_REPORT="$(latest_report)"
+
+check "seeded file reached the worktree" "true" "$(
+  node -e '
+    const report = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const candidate = report.candidates.find((entry) => entry.id === "c1") ?? {};
+    const gate = (candidate.gates ?? []).find((entry) => entry.name === "seeded");
+    process.stdout.write(String(gate !== undefined && gate.passed === true));
+  ' "$SEED_REPORT"
+)"
+# The invariant that matters: seeding must not inflate the candidate's diff.
+check "seeded path stayed out of the diff" "1" "$(candidate_field "$SEED_REPORT" c1 diff.filesChanged)"
+check "seeding did not disturb the working tree" "" "$(git status --porcelain)"
+
 # ------------------------------------------------------------------- verdict
 
 echo

@@ -158,6 +158,17 @@ export function resolveAgent(input: string | AgentConfigInput): { agent: AgentDe
   if (Object.keys(env).length > 0) agent.env = env;
   if (base?.docs !== undefined) agent.docs = base.docs;
 
+  const timeoutMs = spec.timeoutMs ?? base?.timeoutMs;
+  if (timeoutMs !== undefined) {
+    if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new FlashoverError(
+        `Agent "${agent.name}" has invalid timeoutMs ${String(spec.timeoutMs)}.`,
+        'timeoutMs must be a positive number of milliseconds.',
+      );
+    }
+    agent.timeoutMs = Math.floor(timeoutMs);
+  }
+
   return { agent, count };
 }
 

@@ -232,14 +232,16 @@ If a seeded path is tracked by git, flashover warns: the exclusion would discard
 `promote.mode`:
 
 - `branch` — writes `git branch <prefix><slug> <sha>` at the winner's commit. Nothing is checked out. A name collision appends `-2`, `-3`, and so on.
-- `patch` — no branch; the report points at the winner's `.patch` file.
-- `none` — no branch. The commit becomes unreachable and may be garbage collected; the patch file remains.
+- `patch` — no branch; `promotedPatch` in the report points at the winner's `.patch` file, ready for `git apply`.
+- `none` — nothing is promoted. Both `promotedBranch` and `promotedPatch` are `null`, and the winner's commit becomes unreachable and may be garbage collected. Use this when you only want the verdict. The patch file still exists under `.flashover/` and is reachable via the winning candidate's own `patchPath`.
 
 `keep`:
 
 - `all` — every worktree stays, for inspecting losers.
 - `winner` — only the winner's worktree stays.
 - `none` — all removed. Promoted branches are unaffected, because the commit lives in the shared object database.
+
+> `flashover clean` deletes `.flashover/` entirely, which includes every exported patch. A branch promotion survives that; a **patch promotion does not**. Apply or copy the patch before cleaning.
 
 ---
 

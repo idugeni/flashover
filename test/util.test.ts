@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { clamp, formatDuration, pool, renderTable, slugify, tail, truncate } from '../src/util.js';
+import { clamp, formatDuration, makeRunId, pool, renderTable, slugify, tail, truncate } from '../src/util.js';
 
 describe('pool', () => {
   it('preserves input order regardless of completion order', async () => {
@@ -97,6 +97,31 @@ describe('slugify', () => {
     const slug = slugify('aaaa bbbb cccc dddd', 10);
     assert.ok(!slug.endsWith('-'), `unexpected trailing dash in "${slug}"`);
     assert.ok(slug.length <= 10);
+  });
+});
+
+describe('makeRunId', () => {
+  it('encodes the timestamp to millisecond precision', () => {
+    assert.match(makeRunId(new Date(2026, 6, 31, 6, 23, 32, 45)), /^20260731-062332-045-[0-9a-f]{4}$/);
+  });
+
+  it('sorts chronologically as a string, including within one second', () => {
+    // findLatestRunDir sorts run ids lexicographically, so ordering must survive
+    // back-to-back runs or `flashover report` could show the wrong run.
+    const earlier = makeRunId(new Date(2026, 6, 31, 6, 23, 32, 100));
+    const later = makeRunId(new Date(2026, 6, 31, 6, 23, 32, 900));
+    const nextSecond = makeRunId(new Date(2026, 6, 31, 6, 23, 33, 0));
+
+    assert.ok(earlier < later, `${earlier} should sort before ${later}`);
+    assert.ok(later < nextSecond, `${later} should sort before ${nextSecond}`);
+  });
+
+  it('is unique even at the same instant', () => {
+    // Two runs sharing a directory would let one delete the other's worktree.
+    const fixed = new Date(2026, 6, 31, 6, 23, 32, 500);
+    const ids = new Set(Array.from({ length: 200 }, () => makeRunId(fixed)));
+
+    assert.ok(ids.size > 190, `expected near-unique ids, got ${ids.size} distinct of 200`);
   });
 });
 

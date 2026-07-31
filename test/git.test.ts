@@ -115,11 +115,6 @@ describe('worktree lifecycle', () => {
     assert.equal(await readFile(join(repoRoot, '.gitignore'), 'utf8'), gitignoreBefore);
   });
 
-  it('detects ignored paths', async () => {
-    assert.equal(await git.isPathIgnored(repoRoot, 'ignored-dir'), true);
-    assert.equal(await git.isPathIgnored(repoRoot, 'app.txt'), false);
-  });
-
   it('captures a candidate diff, commits it, and promotes a branch', async () => {
     const worktreePath = join(repoRoot, '.flashover', 'test-run', 'c1');
 

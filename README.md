@@ -232,14 +232,22 @@ Exit codes are part of the contract:
 Every run leaves a directory you can dig into:
 
 ```
-.flashover/run-20260731-062332/
+.flashover/run-20260731-062332-338-9f3a/
 ├── report.json          the machine-readable verdict
 ├── logs/c1.log          full agent transcript, tail -f while it runs
 ├── patches/c1.patch     each candidate's diff, applies with git apply
 └── c1/                  the worktree itself (kept per `keep` policy)
 ```
 
-`.flashover/` is added to `.git/info/exclude` automatically, not to your `.gitignore` — flashover is borrowing your repo and shouldn't leave a tracked change behind. Remove everything with `flashover clean`; promoted branches survive it.
+`.flashover/` is added to `.git/info/exclude` automatically, not to your `.gitignore` — flashover is borrowing your repo and shouldn't leave a tracked change behind.
+
+`flashover clean` removes all of it. Promoted **branches** survive, because the commit lives in git's object database. Promoted **patches** do not — they are files inside `.flashover/`. If you used `--promote patch`, apply or copy the patch before cleaning.
+
+If you run flashover often, alias it:
+
+```bash
+alias fo=flashover
+```
 
 ---
 

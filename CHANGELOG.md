@@ -37,6 +37,11 @@ First release.
 
 ### Notes on behaviour
 
+- `promote: patch` advertises the winner's patch file; `promote: none` advertises
+  nothing at all. Both skip branch creation.
+- `flashover clean` deletes `.flashover/`, which includes exported patches. Branch
+  promotions survive it, patch promotions do not.
+
 - Candidates branch from committed state; uncommitted work is invisible to agents
   and flashover warns about it.
 - An agent that exits non-zero or times out is not evaluated at all. Its

@@ -21,8 +21,7 @@
     "node": ">=20.11"
   },
   "bin": {
-    "flashover": "dist/cli.js",
-    "fo": "dist/cli.js"
+    "flashover": "dist/cli.js"
   },
   "main": "dist/index.js",
   "exports": {
@@ -34,16 +33,17 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build:test && node --test \"dist-test/test/*.test.js\"",
+    "test": "npm run build:test && node --test dist-test/test/*.test.js",
     "clean": "rm -rf dist dist-test",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "yaml": "^2.6.1"

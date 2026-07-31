@@ -111,7 +111,7 @@ Tie-breakers, in order: score, then total churn (`insertions + deletions`) ascen
 
 ```
 .flashover/
-└── run-20260731-062332/
+└── run-20260731-062332-338-9f3a/
     ├── report.json
     ├── c1/ c2/ c3/            candidate worktrees (per `keep`)
     ├── logs/c1.log            agent transcripts, streamed live
@@ -119,7 +119,7 @@ Tie-breakers, in order: score, then total churn (`insertions + deletions`) ascen
     └── scratch/c1.prompt.txt  prompt files for promptMode: file
 ```
 
-Run ids are timestamp-prefixed (`YYYYMMDD-HHMMSS`), so lexicographic sort is chronological. `findLatestRunDir` relies on that.
+Run ids are `YYYYMMDD-HHMMSS-mmm-xxxx` (date, time, milliseconds, random). `findLatestRunDir` sorts them as strings, so both trailing segments matter: milliseconds keep that sort chronological for back-to-back runs, and the random suffix guarantees two runs never share a directory — a collision would be destructive, because creating a candidate worktree clears any leftover directory at its path.
 
 ---
 

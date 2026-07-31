@@ -11,17 +11,6 @@ import type { AgentDefinition, AgentConfigInput } from './types.js';
 import { FlashoverError } from './types.js';
 
 /**
- * Placeholders usable inside `args` entries.
- *
- * `{{prompt}}`      the task prompt (only for `promptMode: "arg"`)
- * `{{promptFile}}`  absolute path to a file holding the prompt
- * `{{worktree}}`    absolute path to this candidate's isolated worktree
- * `{{candidateId}}` short id such as `c3`
- * `{{index}}`       zero-based candidate index
- */
-export const PLACEHOLDERS = ['prompt', 'promptFile', 'worktree', 'candidateId', 'index'] as const;
-
-/**
  * The preset registry. Keys are the names accepted by `--agent`.
  *
  * Every preset must be non-interactive and must edit files in place inside its

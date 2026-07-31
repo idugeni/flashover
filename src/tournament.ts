@@ -351,8 +351,11 @@ async function promoteWinner(
   config: ResolvedConfig,
   winner: CandidateResult,
 ): Promise<{ branch: string | null; patch: string | null }> {
+  // `none` reports nothing as promoted: the caller asked flashover to judge, not
+  // to hand back an artifact. The patch still exists under `.flashover/` and is
+  // reachable through the candidate's own `patchPath`, so no data is lost.
   if (config.promote.mode === 'none') {
-    return { branch: null, patch: winner.patchPath };
+    return { branch: null, patch: null };
   }
 
   if (config.promote.mode === 'patch') {

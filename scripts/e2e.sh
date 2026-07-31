@@ -170,7 +170,22 @@ RUN_EXIT=$?
 set -e
 check "exit code 0 (winner promoted)" "0" "$RUN_EXIT"
 
-REPORT="$(find "$REPO/.flashover" -name report.json | head -1)"
+# Run ids sort chronologically, so the last path is the newest run.
+latest_report() {
+  find "$REPO/.flashover" -name report.json | sort | tail -1
+}
+
+# Read one top-level report field. The field name is passed as argv rather than
+# interpolated into JS, so no shell quoting can leak into code.
+report_field() {
+  node -e '
+    const r = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const v = r[process.argv[2]];
+    process.stdout.write(v === null || v === undefined ? "null" : String(v));
+  ' "$1" "$2"
+}
+
+REPORT="$(latest_report)"
 check "report.json written" "yes" "$([ -n "$REPORT" ] && echo yes || echo no)"
 
 # Extract everything in one pass into shell variables. Building JS expressions
@@ -256,6 +271,35 @@ check "artifacts removed"  "no"  "$([ -d .flashover ] && echo yes || echo no)"
 check "only main worktree" "1"   "$(git worktree list | wc -l | tr -d ' ')"
 check "promoted branch survives" "yes" \
   "$(git rev-parse --verify --quiet "$BRANCH" > /dev/null && echo yes || echo no)"
+
+# ---------------------------------------------------------- promote modes
+
+# `none` and `patch` both skip branch creation, so it would be easy for them to
+# quietly collapse into the same behaviour. They must stay distinguishable:
+# `patch` advertises an artifact, `none` advertises nothing.
+#
+# Runs last, and each run starts from an empty artifact directory, so the report
+# under test is unambiguous rather than "whichever sorts last".
+echo
+echo "promote modes:"
+BRANCHES_BEFORE="$(git branch --list | wc -l | tr -d ' ')"
+
+rm -rf "$REPO/.flashover"
+node "$CLI" "make add 2 3 return 5" --no-live --promote patch --keep none > /dev/null 2>&1
+PATCH_REPORT="$(latest_report)"
+check "promote patch: one report"        "1"    "$(find "$REPO/.flashover" -name report.json | wc -l | tr -d ' ')"
+check "promote patch: no branch"         "null" "$(report_field "$PATCH_REPORT" promotedBranch)"
+check "promote patch: patch advertised"  "yes" \
+  "$([ "$(report_field "$PATCH_REPORT" promotedPatch)" != "null" ] && echo yes || echo no)"
+check "promote patch: creates no branch" "$BRANCHES_BEFORE" "$(git branch --list | wc -l | tr -d ' ')"
+
+rm -rf "$REPO/.flashover"
+node "$CLI" "make add 2 3 return 5" --no-live --promote none --keep none > /dev/null 2>&1
+NONE_REPORT="$(latest_report)"
+check "promote none: no branch"            "null" "$(report_field "$NONE_REPORT" promotedBranch)"
+check "promote none: nothing advertised"   "null" "$(report_field "$NONE_REPORT" promotedPatch)"
+check "promote none: still names a winner" "c1"   "$(report_field "$NONE_REPORT" winnerId)"
+check "promote none: creates no branch" "$BRANCHES_BEFORE" "$(git branch --list | wc -l | tr -d ' ')"
 
 # ------------------------------------------------------------------- verdict
 

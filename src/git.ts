@@ -80,12 +80,6 @@ export async function revParse(repoRoot: string, ref: string): Promise<string> {
   return result.stdout.trim();
 }
 
-/** Short sha for display. */
-export async function shortSha(repoRoot: string, sha: string): Promise<string> {
-  const result = await git(['rev-parse', '--short', sha], repoRoot);
-  return succeeded(result) ? result.stdout.trim() : sha.slice(0, 7);
-}
-
 /** Porcelain status lines for the working tree, empty when clean. */
 export async function statusLines(repoRoot: string): Promise<string[]> {
   const output = await gitOrThrow(['status', '--porcelain'], repoRoot);
@@ -239,18 +233,6 @@ export async function seedWorktree(
 }
 
 /**
- * True when `relativePath` is ignored by the repository's ignore rules.
- *
- * Used to warn about seed paths that would otherwise be staged as if the agent
- * had created them, silently inflating every candidate's diff.
- */
-export async function isPathIgnored(repoRoot: string, relativePath: string): Promise<boolean> {
-  const result = await git(['check-ignore', '--quiet', '--no-index', relativePath], repoRoot);
-  // Exit 0 means ignored, 1 means not ignored, anything else is an error.
-  return result.code === 0;
-}
-
-/**
  * True when git tracks `relativePath`.
  *
  * Seeding a tracked path is a configuration mistake worth surfacing: flashover
@@ -379,8 +361,3 @@ export async function createBranchAt(repoRoot: string, branch: string, sha: stri
   }
 }
 
-/** Verify a patch applies cleanly to the current working tree. */
-export async function patchApplies(repoRoot: string, patchPath: string): Promise<boolean> {
-  const result = await git(['apply', '--check', patchPath], repoRoot, GIT_SLOW_TIMEOUT_MS);
-  return result.code === 0;
-}

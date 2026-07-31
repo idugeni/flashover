@@ -66,9 +66,6 @@ export const log = {
   info(message: string): void {
     if (enabled('info')) emit(message);
   },
-  step(message: string): void {
-    if (enabled('info')) emit(`${style.cyan('▸')} ${message}`);
-  },
   success(message: string): void {
     if (enabled('info')) emit(`${style.green('✓')} ${message}`);
   },

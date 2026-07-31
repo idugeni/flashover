@@ -1,5 +1,7 @@
 /** Small dependency-free helpers shared across modules. */
 
+import { randomBytes } from 'node:crypto';
+
 /**
  * Run `worker` over `items` with at most `limit` in flight at once.
  *
@@ -85,21 +87,24 @@ export function clamp(value: number, min: number, max: number): number {
 
 /**
  * Timestamp-based run id, sortable and filesystem safe.
- * Example: `20260731-055412`.
+ * Example: `20260731-055412-338-9f3a`, as `date-time-millis-random`.
+ *
+ * Both trailing segments earn their place:
+ *
+ * - **Milliseconds** keep lexicographic order chronological at a resolution
+ *   finer than a human can start two runs. `findLatestRunDir` sorts run ids as
+ *   strings, so a coarser stamp would make "latest" ambiguous for back-to-back
+ *   runs and could report the wrong one.
+ * - **Random suffix** guarantees two runs never share a directory. Creating a
+ *   candidate worktree clears any leftover directory at its path, so a collision
+ *   would delete a concurrent run's worktree from under it.
  */
 export function makeRunId(now: Date = new Date()): string {
   const pad = (n: number): string => String(n).padStart(2, '0');
-  return (
-    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  );
-}
-
-/** Sum of a numeric projection over a list. */
-export function sumBy<T>(items: readonly T[], project: (item: T) => number): number {
-  let total = 0;
-  for (const item of items) total += project(item);
-  return total;
+  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const millis = String(now.getMilliseconds()).padStart(3, '0');
+  return `${date}-${time}-${millis}-${randomBytes(2).toString('hex')}`;
 }
 
 /** Render a plain text table with right-aligned numeric columns. */

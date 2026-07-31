@@ -2,6 +2,14 @@
 
 flashover is designed to be a CI step: logs go to stderr, machine-readable output goes to stdout, and the exit code carries the verdict.
 
+> **Not yet published to npm.** The recipes below use `npm install -g flashover`, which is where they will land once released. Until then, substitute a build from source:
+>
+> ```yaml
+> - run: |
+>     git clone --depth 1 https://github.com/idugeni/flashover /tmp/flashover
+>     cd /tmp/flashover && npm ci && npm run build && npm link
+> ```
+
 ## Exit codes
 
 | Code | Meaning | Typical handling |

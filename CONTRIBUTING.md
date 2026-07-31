@@ -103,6 +103,15 @@ For comments: explain *why*, not *what*. A comment that restates the code is noi
 - If behaviour changed, update the affected doc in the same PR.
 - Do not bump the version; releases are cut separately.
 
+## Dependencies
+
+Updated deliberately, not automatically. There are four of them, so `npm outdated` once in a while is cheaper than a stream of bot PRs, and two constraints are easy to break by accident:
+
+- **`@types/node` tracks `engines.node`, not the newest release.** `engines` says `>=20.11`, so types describing newer APIs would let code compile against a runtime that does not have them.
+- **TypeScript major upgrades are their own change.** `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, and `isolatedModules` are all load-bearing here, so a major bump needs its own PR and its own reasoning.
+
+Vulnerabilities are a different matter: GitHub's Dependabot alerts cover those without opening pull requests, and a security fix is worth taking immediately.
+
 ## Reporting bugs
 
 Include:

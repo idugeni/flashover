@@ -442,7 +442,12 @@ check "seeded file reached the worktree" "true" "$(
 )"
 # The invariant that matters: seeding must not inflate the candidate's diff.
 check "seeded path stayed out of the diff" "1" "$(candidate_field "$SEED_REPORT" c1 diff.filesChanged)"
-check "seeding did not disturb the working tree" "" "$(git status --porcelain)"
+# Scoped to tracked files on purpose. Whether stray untracked artifacts exist is a
+# separate question, asked separately below, and conflating the two produced a
+# failure that named neither.
+check "seeding left tracked files alone" "" "$(git status --porcelain --untracked-files=no)"
+check "artifacts still excluded after seeding" "yes" \
+  "$(grep -q '^\.flashover/$' .git/info/exclude && echo yes || echo no)"
 
 # ------------------------------------------------------------------- verdict
 

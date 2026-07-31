@@ -76,6 +76,8 @@ Agents spawn language servers, test runners, package managers. Killing only the 
 
 A directory-only ignore pattern (`node_modules/`) does **not** match a symlink to a directory. Verified behaviour. So `seedWorktree` registers every seeded path in `.git/info/exclude` without a trailing slash. Per-worktree exclude files (`.git/worktrees/<name>/info/exclude`) do **not** work — linked worktrees read ignore rules from the common git directory.
 
+Updates to that file are serialized and written through a rename. Candidates seed concurrently, so an unsynchronized read-modify-write interleaves destructively: one call reads the file while another has truncated it, concludes it is empty, and writes back only its own pattern — discarding `.flashover/`, every earlier exclusion, and any line the user put there themselves. That is data loss in a file flashover only borrowed. Reproduced in roughly one of fifteen four-candidate seeded runs before the queue existed, and zero of thirty after.
+
 ### 6. Gates run sequentially within a candidate, in parallel across candidates
 
 Gates in one candidate share a worktree, so concurrent builds would race on the same output directories. Parallelism belongs at the candidate level.
@@ -144,6 +146,7 @@ Run ids are `YYYYMMDD-HHMMSS-mmm-xxxx` (date, time, milliseconds, random). `find
 - **Pure logic** — scoring, ranking, config validation, placeholder substitution, numstat parsing. Fast, exhaustive.
 - **Process behaviour** — `exec.ts` is tested against real commands: timeouts, tree kills (a backgrounded grandchild that must not survive), output caps, abort signals, stdin.
 - **Git behaviour** — `git.ts` runs against real repositories in temp dirs. The isolation guarantees are only meaningful if git actually behaves as assumed, so those assumptions are asserted rather than trusted.
+- **Interruption** — the CLI is spawned as a child process and sent a real `SIGINT`, then checked for exit code `130`, a partial `report.json`, and a repository left clean enough for the next run to start. Skipped on Windows, which has no faithful equivalent of the signal. Mocking the abort here would test the plumbing rather than the promise, and the promise is the part users rely on.
 
 ```bash
 npm run typecheck

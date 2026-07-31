@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -315,12 +315,46 @@ describe('config file discovery and parsing', () => {
     mkdirSync(nested, { recursive: true });
     writeFileSync(join(root, 'flashover.yaml'), 'version: 1\n', 'utf8');
 
-    assert.equal(findConfigFile(nested, root), join(root, 'flashover.yaml'));
+    assert.equal(findConfigFile(nested, root), join(realpathSync(root), 'flashover.yaml'));
   });
 
   it('returns null when nothing is found before the stop directory', () => {
     const root = mkdtempSync(join(tmpdir(), 'flashover-none-'));
     assert.equal(findConfigFile(root, root), null);
+  });
+
+  it('stops at the repository root even when reached through a symlink', () => {
+    // Reproduces the macOS default, where /tmp and /var are symlinks into
+    // /private while git reports resolved paths. Without resolving both sides,
+    // the stop comparison never matches and the walk escapes the repository,
+    // picking up an unrelated config from a parent directory.
+    const outer = mkdtempSync(join(tmpdir(), 'flashover-symlink-'));
+    const repoRoot = join(outer, 'repo');
+    mkdirSync(join(repoRoot, 'packages', 'app'), { recursive: true });
+
+    // A config that lives outside the repository and must never be selected.
+    writeFileSync(join(outer, 'flashover.yaml'), 'version: 1\n', 'utf8');
+
+    const linkedRepo = join(outer, 'repo-link');
+    symlinkSync(repoRoot, linkedRepo);
+
+    assert.equal(findConfigFile(join(linkedRepo, 'packages', 'app'), repoRoot), null);
+  });
+
+  it('finds a config inside the repository when reached through a symlink', () => {
+    const outer = mkdtempSync(join(tmpdir(), 'flashover-symlink-hit-'));
+    const repoRoot = join(outer, 'repo');
+    mkdirSync(join(repoRoot, 'packages', 'app'), { recursive: true });
+    writeFileSync(join(repoRoot, 'flashover.yaml'), 'version: 1\n', 'utf8');
+
+    const linkedRepo = join(outer, 'repo-link');
+    symlinkSync(repoRoot, linkedRepo);
+
+    // The returned path is symlink-resolved, matching what git would report.
+    assert.equal(
+      findConfigFile(join(linkedRepo, 'packages', 'app'), repoRoot),
+      join(realpathSync(repoRoot), 'flashover.yaml'),
+    );
   });
 
   it('parses YAML', () => {

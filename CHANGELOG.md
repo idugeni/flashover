@@ -49,6 +49,9 @@ First release.
 - Timeouts kill the whole process tree, not just the direct child.
 - Seeded paths are registered in `.git/info/exclude`, because a directory-only
   ignore pattern such as `node_modules/` does not match a symlink to a directory.
+- Config discovery resolves symlinks before comparing against the repository
+  root. git reports real paths, so an unresolved working directory would let the
+  search escape the repository and pick up an unrelated config.
 - Combining `seed.link` with an install command (`npm ci` and friends) would
   rewrite your real dependency tree from several candidates at once. flashover
   warns when it detects this.

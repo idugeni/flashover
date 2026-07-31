@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,7 +53,8 @@ describe('worktree lifecycle', () => {
   };
 
   before(async () => {
-    repoRoot = mkdtempSync(join(tmpdir(), 'flashover-repo-'));
+    // Symlink-resolved, because git reports real paths and macOS puts /var behind a symlink.
+    repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'flashover-repo-')));
     await run(['init', '-b', 'main']);
     await run(['config', 'user.name', 'Test User']);
     await run(['config', 'user.email', 'test@example.com']);

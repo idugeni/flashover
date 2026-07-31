@@ -7,7 +7,7 @@
  * trust.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
@@ -93,10 +93,29 @@ export interface ConfigOverrides {
   seedCopy?: string[];
 }
 
-/** Walk up from `startDir` to the repo root looking for a config file. */
+/**
+ * Resolve symlinks, falling back to plain resolution for paths that do not exist.
+ */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * Walk up from `startDir` to the repo root looking for a config file.
+ *
+ * Both paths are symlink-resolved first. `git rev-parse --show-toplevel` reports
+ * a real path, so an unresolved `startDir` would never compare equal to the
+ * repository root and the walk would escape the repository entirely — picking up
+ * a stranger's `flashover.yaml` from a parent directory. On macOS this is the
+ * default situation, because `/tmp` and `/var` are symlinks into `/private`.
+ */
 export function findConfigFile(startDir: string, stopDir?: string): string | null {
-  let dir = resolve(startDir);
-  const stop = stopDir === undefined ? null : resolve(stopDir);
+  let dir = realPath(startDir);
+  const stop = stopDir === undefined ? null : realPath(stopDir);
 
   for (;;) {
     for (const filename of CONFIG_FILENAMES) {

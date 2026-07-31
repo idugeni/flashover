@@ -11,7 +11,7 @@
  * 130  interrupted (SIGINT)
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -190,7 +190,7 @@ async function main(argv: readonly string[]): Promise<number> {
 /* ------------------------------------------------------------------ run --- */
 
 async function commandRun(cli: ParsedCli): Promise<number> {
-  const cwd = process.cwd();
+  const cwd = currentDir();
   const repoRoot = await git.findRepoRoot(cwd);
 
   const configPath = resolveConfigPath(cli, cwd, repoRoot);
@@ -344,7 +344,7 @@ async function warnIfWorkingTreeDirty(repoRoot: string, baseRef: string): Promis
 /* ----------------------------------------------------------------- init --- */
 
 async function commandInit(cli: ParsedCli): Promise<number> {
-  const cwd = process.cwd();
+  const cwd = currentDir();
   const repoRoot = await git.findRepoRoot(cwd);
   const target = join(repoRoot, 'flashover.yaml');
 
@@ -529,7 +529,7 @@ function renderStarterConfig(detected: DetectedProject): string {
 
 async function commandDoctor(cli: ParsedCli): Promise<number> {
   let problems = 0;
-  const cwd = process.cwd();
+  const cwd = currentDir();
 
   log.info(style.bold('environment'));
   log.info(`  flashover    ${await readVersion()}`);
@@ -621,7 +621,7 @@ async function commandDoctor(cli: ParsedCli): Promise<number> {
 /* --------------------------------------------------------------- report --- */
 
 async function commandReport(cli: ParsedCli): Promise<number> {
-  const cwd = process.cwd();
+  const cwd = currentDir();
   const repoRoot = await git.findRepoRoot(cwd);
   const explicit = cli.positionals[0];
 
@@ -665,7 +665,7 @@ async function commandReport(cli: ParsedCli): Promise<number> {
 /* ---------------------------------------------------------------- clean --- */
 
 async function commandClean(cli: ParsedCli): Promise<number> {
-  const cwd = process.cwd();
+  const cwd = currentDir();
   const repoRoot = await git.findRepoRoot(cwd);
   const workDir = join(repoRoot, '.flashover');
   const dryRun = cli.values['dry-run'] === true;
@@ -781,6 +781,22 @@ async function readVersion(): Promise<string> {
     }
   }
   return '0.0.0';
+}
+
+/**
+ * The working directory with symlinks resolved.
+ *
+ * Every path flashover derives — the repository root, the artifact directory,
+ * worktrees — ultimately comes from git, which reports real paths. Starting from
+ * an unresolved cwd would make those comparisons fail wherever a directory sits
+ * behind a symlink, which on macOS includes `/tmp` and `/var`.
+ */
+function currentDir(): string {
+  try {
+    return realpathSync(process.cwd());
+  } catch {
+    return process.cwd();
+  }
 }
 
 function reportError(err: unknown): void {

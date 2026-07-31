@@ -61,6 +61,9 @@ First release.
 - Timeouts kill the whole process tree, not just the direct child.
 - Seeded paths are registered in `.git/info/exclude`, because a directory-only
   ignore pattern such as `node_modules/` does not match a symlink to a directory.
+  Updates to that file are serialized: candidates seed concurrently, and an
+  interleaved read-modify-write could otherwise discard `.flashover/`, earlier
+  exclusions, and lines the user had added themselves.
 - Config discovery resolves symlinks before comparing against the repository
   root. git reports real paths, so an unresolved working directory would let the
   search escape the repository and pick up an unrelated config.

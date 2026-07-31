@@ -121,6 +121,37 @@ describe('worktree lifecycle', () => {
     assert.equal(await readFile(join(repoRoot, '.gitignore'), 'utf8'), gitignoreBefore);
   });
 
+  it('loses nothing when many exclusions are registered at once', async () => {
+    // Regression, and a destructive one. Candidates seed concurrently and each
+    // registers its paths, so the read-modify-write used to interleave: one call
+    // read the file while another had truncated it, saw an empty file, and wrote
+    // back only its own pattern. That discarded `.flashover/`, every earlier
+    // exclusion, and any line the user had put there themselves. Observed in
+    // roughly one of fifteen four-candidate seeded runs.
+    const excludePath = join(repoRoot, '.git', 'info', 'exclude');
+    const sentinel = 'user-put-this-here/';
+
+    await git.ensureExcluded(repoRoot, [sentinel]);
+    const before = await readFile(excludePath, 'utf8');
+    assert.ok(before.includes(sentinel), 'precondition: the sentinel is present');
+
+    // Distinct patterns, so a lost update cannot hide behind identical content.
+    const patterns = Array.from({ length: 24 }, (_, i) => `concurrent-${i}/`);
+    await Promise.all(patterns.map((pattern) => git.ensureExcluded(repoRoot, [pattern])));
+
+    const after = await readFile(excludePath, 'utf8');
+    const lines = new Set(after.split('\n').map((line) => line.trim()));
+
+    for (const pattern of patterns) {
+      assert.ok(lines.has(pattern), `${pattern} was lost to a concurrent update`);
+    }
+    assert.ok(lines.has(sentinel), 'a pre-existing entry was destroyed');
+    assert.ok(
+      after.startsWith('# git ls-files'),
+      "git's own template comments were destroyed, so the whole file was overwritten",
+    );
+  });
+
   it('captures a candidate diff, commits it, and promotes a branch', async () => {
     const worktreePath = join(repoRoot, '.flashover', 'test-run', 'c1');
 

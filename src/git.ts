@@ -9,7 +9,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { cp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import type { DiffStat } from './types.js';
@@ -126,6 +126,28 @@ export async function currentBranch(repoRoot: string): Promise<string | null> {
  */
 export async function ensureExcluded(repoRoot: string, patterns: readonly string[]): Promise<void> {
   if (patterns.length === 0) return;
+
+  const task = excludeQueue.then(() => updateExcludeFile(repoRoot, patterns));
+  // The chain must survive a failed update. A rejected link would block every
+  // later exclusion, turning a cosmetic problem into a systematic one.
+  excludeQueue = task.catch(() => undefined);
+  return task;
+}
+
+/**
+ * Serializes updates to `.git/info/exclude`.
+ *
+ * Candidates seed concurrently and each registers its paths, so an unsynchronized
+ * read-modify-write interleaves destructively: one call can read the file while
+ * another has already truncated it to zero bytes, conclude it is empty, and write
+ * back only its own patterns. That destroys `.flashover/`, every exclusion added
+ * earlier, and whatever the user had put there themselves — data loss in a file
+ * flashover only borrowed. Reproduced in roughly one of fifteen four-candidate
+ * seeded runs before this queue existed.
+ */
+let excludeQueue: Promise<unknown> = Promise.resolve();
+
+async function updateExcludeFile(repoRoot: string, patterns: readonly string[]): Promise<void> {
   const excludePath = join(repoRoot, '.git', 'info', 'exclude');
 
   try {
@@ -138,7 +160,14 @@ export async function ensureExcluded(repoRoot: string, patterns: readonly string
 
     await mkdir(dirname(excludePath), { recursive: true });
     const prefix = existing === '' || existing.endsWith('\n') ? '' : '\n';
-    await writeFile(excludePath, `${existing}${prefix}# added by flashover\n${missing.join('\n')}\n`, 'utf8');
+    const next = `${existing}${prefix}# added by flashover\n${missing.join('\n')}\n`;
+
+    // Written through a rename so no reader — git included — can observe the file
+    // mid-truncation, and so a crash mid-write cannot leave it empty.
+    const tempPath = `${excludePath}.flashover-${String(process.pid)}.tmp`;
+    await writeFile(tempPath, next, 'utf8');
+    await rename(tempPath, excludePath);
+
     log.debug(`Excluded ${missing.join(', ')} via .git/info/exclude`);
   } catch (err) {
     log.debug(`Could not update .git/info/exclude: ${err instanceof Error ? err.message : String(err)}`);

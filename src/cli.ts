@@ -19,7 +19,7 @@ import { parseArgs } from 'node:util';
 
 import type { ConfigOverrides } from './config.js';
 import { CONFIG_FILENAMES, findConfigFile, loadConfigFile, resolveConfig } from './config.js';
-import { commandExists } from './exec.js';
+import { commandExists, posixShellAvailable } from './exec.js';
 import * as git from './git.js';
 import { log, setLogLevel, style } from './log.js';
 import { PRESETS, presetNames } from './presets.js';
@@ -538,6 +538,19 @@ async function commandDoctor(cli: ParsedCli): Promise<number> {
   const hasGit = await commandExists('git');
   log.info(`  git          ${hasGit ? style.green('found') : style.red('missing')}`);
   if (!hasGit) problems += 1;
+
+  // Gates and judges are shell command lines run through `sh -c`, so without a
+  // POSIX shell nothing can be scored and every run ends with no winner. Worth
+  // its own line rather than surfacing later as a pile of failed gates.
+  const hasShell = await posixShellAvailable();
+  log.info(`  sh           ${hasShell ? style.green('found') : style.red('missing')}`);
+  if (!hasShell) {
+    problems += 1;
+    log.info(
+      `               ${style.gray('gates and judges run via `sh -c`; without it no candidate can be scored')}`,
+    );
+    log.info(`               ${style.gray('flashover targets Linux and macOS; Windows is not supported')}`);
+  }
 
   let repoRoot: string | null = null;
   try {

@@ -248,4 +248,69 @@ describe('worktree lifecycle', () => {
 
     await git.removeWorktree(repoRoot, worktreePath);
   });
+
+  it('exports a patch larger than the output buffer cap intact', async () => {
+    // Regression: the patch used to be buffered through exec, which caps
+    // retained output at 256 KB and keeps the *tail*. Any larger patch therefore
+    // lost its leading `diff --git` header and became a file git refuses, while
+    // reporting success. A lockfile or generated-file change reaches that size
+    // easily, and this same file is what the judge scores and what
+    // `--promote patch` hands the user.
+    const worktreePath = join(repoRoot, '.flashover', 'test-run', 'c8');
+    await git.addWorktree(repoRoot, worktreePath, baseSha);
+
+    // ~500 KB of additions, comfortably past the cap.
+    const lines = Array.from({ length: 12_000 }, (_, i) => `line ${i} ${'x'.repeat(30)}`);
+    await writeFile(join(worktreePath, 'big.txt'), `${lines.join('\n')}\n`, 'utf8');
+
+    await git.stageAll(worktreePath);
+    const patchPath = join(repoRoot, '.flashover', 'test-run', 'patches', 'c8.patch');
+    await git.exportStagedPatch(worktreePath, patchPath);
+
+    const patch = await readFile(patchPath, 'utf8');
+    assert.ok(patch.length > 400_000, `patch truncated to ${patch.length} chars`);
+    assert.ok(patch.startsWith('diff --git '), 'patch lost its header');
+    assert.ok(patch.includes('+line 0 '), 'patch lost its first hunk');
+    assert.ok(patch.includes('+line 11999 '), 'patch lost its last hunk');
+
+    // The assertion that actually matters: git has to accept it.
+    const check = await execFile('git', ['apply', '--check', patchPath], {
+      cwd: repoRoot,
+      timeoutMs: 60_000,
+    });
+    assert.equal(check.code, 0, `git apply --check rejected the patch: ${check.stderr}`);
+
+    await git.removeWorktree(repoRoot, worktreePath);
+  });
+
+  it('counts every file when numstat output exceeds the buffer cap', async () => {
+    // Same root cause, quieter symptom: numstat emits one line per changed file,
+    // so a wide change overran the cap and the surviving tail was missing files
+    // entirely. That undercount feeds the churn tie-breaker used to rank
+    // candidates, so it could silently pick the wrong winner.
+    const worktreePath = join(repoRoot, '.flashover', 'test-run', 'c9');
+    await git.addWorktree(repoRoot, worktreePath, baseSha);
+
+    // Sized to overrun 256 KB of numstat while keeping every absolute path well
+    // inside the 260-character limit Windows still enforces by default.
+    // Per line: "1\t0\t" + dir + "/" + name + "\n" ≈ 147 bytes, so 2200 files
+    // produce ~320 KB.
+    const dir = 'n'.repeat(40);
+    const filler = 'y'.repeat(90);
+    const fileCount = 2200;
+
+    await mkdir(join(worktreePath, dir), { recursive: true });
+    for (let i = 0; i < fileCount; i += 1) {
+      await writeFile(join(worktreePath, dir, `f${String(i).padStart(5, '0')}-${filler}.txt`), 'one line\n', 'utf8');
+    }
+
+    await git.stageAll(worktreePath);
+    const stat = await git.stagedDiffStat(worktreePath);
+
+    assert.equal(stat.filesChanged, fileCount);
+    assert.equal(stat.insertions, fileCount);
+    assert.equal(stat.deletions, 0);
+
+    await git.removeWorktree(repoRoot, worktreePath);
+  });
 });

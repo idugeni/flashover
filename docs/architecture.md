@@ -84,6 +84,14 @@ Gates in one candidate share a worktree, so concurrent builds would race on the 
 
 The run already produced its verdict. Leftover directories are recoverable with `flashover clean`.
 
+### 9. A patch is byte-exact or it is worthless
+
+`git diff --cached --binary` is streamed straight to the patch file via `exec`'s `stdoutPath`, never buffered. Buffering broke it twice over, silently: the retained-output cap keeps the *tail*, so a patch over 256 KB lost its leading `diff --git` header and `git apply` rejected it, and UTF-8 decoding corrupts diffs of files that are not valid UTF-8. The same file is what the judge scores and what `promote: patch` hands back, so a partial write is worse than a hard failure. For the same reason `stagedDiffStat` reads numstat uncapped: dropped lines are silently missing files, and the resulting undercount feeds the churn tie-breaker.
+
+### 10. Binary lookup never depends on a shell
+
+`commandExists` resolves PATH in-process. Delegating to `sh -c "command -v"` meant that on a machine without `sh`, every binary was reported missing — including git, on the same `doctor` run that had just used git to locate the repository. A diagnostic that contradicts itself is worse than no diagnostic.
+
 ---
 
 ## Scoring model

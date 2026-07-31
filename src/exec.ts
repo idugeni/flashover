@@ -11,11 +11,17 @@
  *     own process group and the group is signalled as a unit.
  *  2. **Output is captured with a bound.** An agent stuck in a retry loop can
  *     emit gigabytes. Buffers are capped, keeping the most recent output, which
- *     is the part that explains a failure.
+ *     is the part that explains a failure. Output that must survive verbatim
+ *     instead of being summarized — a patch, for instance — bypasses the buffer
+ *     entirely via `stdoutPath`, because a capped or re-encoded patch is not a
+ *     smaller patch, it is a broken one.
  */
 
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
+import { constants, createWriteStream } from 'node:fs';
+import { access, stat } from 'node:fs/promises';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
 
 /** Default cap on retained stdout/stderr per process. */
 const DEFAULT_MAX_BUFFER_CHARS = 256 * 1024;
@@ -35,8 +41,20 @@ export interface ExecOptions {
   onStdout?: (chunk: string) => void;
   /** Streaming hook, called with each decoded stderr chunk. */
   onStderr?: (chunk: string) => void;
-  /** Cap on retained output per stream. */
+  /**
+   * Cap on retained output per stream. Pass `Infinity` to retain everything,
+   * which is only safe for commands whose output size you control.
+   */
   maxBufferChars?: number;
+  /**
+   * Write raw stdout bytes to this path instead of decoding and buffering them.
+   *
+   * Required for output that must survive verbatim and may be arbitrarily large,
+   * such as a patch: the buffered path is both capped and UTF-8 decoded, either
+   * of which corrupts the bytes. `stdout` in the result stays empty, and
+   * `onStdout` is not called. The parent directory must already exist.
+   */
+  stdoutPath?: string;
   /** Abort the process early, e.g. on Ctrl-C. */
   signal?: AbortSignal;
 }
@@ -122,11 +140,25 @@ function run(command: string, args: readonly string[], useShell: boolean, option
       return combined.length > maxChars ? combined.slice(combined.length - maxChars) : combined;
     };
 
-    child.stdout?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      stdout = append(stdout, chunk);
-      options.onStdout?.(chunk);
-    });
+    // Raw passthrough to disk when the caller needs the bytes intact. Decoding
+    // and buffering would both cap the output and mangle any non-UTF-8 content.
+    let stdoutFileDone: Promise<void> | undefined;
+    if (options.stdoutPath !== undefined && child.stdout !== null) {
+      const target = options.stdoutPath;
+      const file = createWriteStream(target);
+      stdoutFileDone = new Promise<void>((resolveFile, rejectFile) => {
+        file.on('finish', resolveFile);
+        file.on('error', rejectFile);
+        child.stdout?.on('error', rejectFile);
+      });
+      child.stdout.pipe(file);
+    } else {
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', (chunk: string) => {
+        stdout = append(stdout, chunk);
+        options.onStdout?.(chunk);
+      });
+    }
 
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk: string) => {
@@ -159,11 +191,28 @@ function run(command: string, args: readonly string[], useShell: boolean, option
       if (settled) return;
       settled = true;
       cleanup();
-      resolvePromise({
-        ...result,
-        command: displayCommand,
-        durationMs: Date.now() - startedAt,
-      });
+
+      const deliver = (spawnErrorOverride?: string): void => {
+        resolvePromise({
+          ...result,
+          ...(spawnErrorOverride === undefined ? {} : { spawnError: spawnErrorOverride }),
+          command: displayCommand,
+          durationMs: Date.now() - startedAt,
+        });
+      };
+
+      // The child can close before its stdout has finished draining into the
+      // file, so a caller that reads the file immediately would see a partial
+      // write. Wait for the flush.
+      if (stdoutFileDone === undefined) {
+        deliver();
+        return;
+      }
+      void stdoutFileDone.then(
+        () => deliver(),
+        (err: unknown) =>
+          deliver(`Failed to write ${String(options.stdoutPath)}: ${err instanceof Error ? err.message : String(err)}`),
+      );
     };
 
     function onAbort(): void {
@@ -222,11 +271,71 @@ function buildEnv(overrides: ExecOptions['env']): Record<string, string> {
   return merged;
 }
 
-/** True when `binary` is resolvable on the current PATH. */
+/**
+ * True when `binary` is resolvable as an executable on the current PATH.
+ *
+ * Resolved in-process rather than by shelling out. The previous implementation
+ * asked `sh -c "command -v ..."`, which reports *every* binary as missing
+ * wherever `sh` itself is absent — so `flashover doctor` would claim git was not
+ * installed on the same line it printed the repository git had just resolved.
+ * Diagnostics have to be trustworthy to be worth printing.
+ */
 export async function commandExists(binary: string): Promise<boolean> {
-  const result = await execFile('sh', ['-c', `command -v ${JSON.stringify(binary)} >/dev/null 2>&1`], {
-    cwd: process.cwd(),
-    timeoutMs: 5000,
-  });
+  const trimmed = binary.trim();
+  if (trimmed === '') return false;
+
+  // An explicit path is checked as given; PATH lookup does not apply to it.
+  if (trimmed.includes('/') || trimmed.includes('\\') || isAbsolute(trimmed)) {
+    return isExecutableFile(resolve(trimmed));
+  }
+
+  const searchPath = process.env['PATH'] ?? '';
+  for (const dir of searchPath.split(delimiter)) {
+    if (dir === '') continue;
+    for (const extension of executableExtensions()) {
+      if (await isExecutableFile(join(dir, trimmed + extension))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when a POSIX shell is available.
+ *
+ * Gate and judge commands are user-authored shell command lines run through
+ * `sh -c`, so without one no candidate can be scored. Tested by actually
+ * spawning the shell, so this reflects the exact mechanism gates depend on.
+ */
+export async function posixShellAvailable(): Promise<boolean> {
+  const result = await execShell('exit 0', { cwd: process.cwd(), timeoutMs: 5000 });
   return succeeded(result);
+}
+
+/**
+ * Suffixes to try when resolving a bare command name.
+ *
+ * On Windows executability comes from the extension rather than a permission
+ * bit, and `PATHEXT` is what decides which extensions count.
+ */
+function executableExtensions(): string[] {
+  if (process.platform !== 'win32') return [''];
+  const pathext = process.env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD';
+  return ['', ...pathext.split(';').filter((entry) => entry !== '')];
+}
+
+async function isExecutableFile(candidate: string): Promise<boolean> {
+  try {
+    const stats = await stat(candidate);
+    if (!stats.isFile()) return false;
+  } catch {
+    return false;
+  }
+  // Windows has no execute bit; reaching here means the extension matched.
+  if (process.platform === 'win32') return true;
+  try {
+    await access(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }

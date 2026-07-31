@@ -55,3 +55,14 @@ First release.
 - Combining `seed.link` with an install command (`npm ci` and friends) would
   rewrite your real dependency tree from several candidates at once. flashover
   warns when it detects this.
+- Patches are streamed from git straight to disk rather than buffered. Process
+  output is capped and UTF-8 decoded, and a patch tolerates neither: the cap
+  keeps the tail, which discards the `diff --git` header and produces a file
+  `git apply` rejects. The same cap would drop numstat lines on a wide change and
+  undercount the diff that ranking uses as a tie-breaker.
+- Agent and gate binaries are resolved against PATH in-process. Asking a shell to
+  do it meant that wherever the shell was absent, every binary looked absent too
+  — including git, on the same `doctor` run that had already used git.
+- Linux and macOS only. Gates, judges, timeout handling, and `seed.link` all
+  depend on POSIX behaviour (`sh -c`, process-group signals, symlinks), so the
+  package declares `"os": ["!win32"]` instead of installing and then failing.

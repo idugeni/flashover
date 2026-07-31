@@ -59,7 +59,7 @@ Or run it without installing:
 npx flashover "fix the flaky auth test" -a claude -g "!test:npm test"
 ```
 
-Requires Node 20.11+, git, and at least one agent CLI on your PATH. Check with:
+Requires Linux or macOS, Node 20.11+, git, and at least one agent CLI on your PATH. Gates and judges are shell command lines run through `sh`, so Windows is not supported — `npm install` refuses it rather than failing later at the first gate. Check your setup with:
 
 ```bash
 flashover doctor

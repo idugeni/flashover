@@ -15,7 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { DiffStat } from './types.js';
 import { FlashoverError } from './types.js';
 import { execFile, succeeded, describeFailure } from './exec.js';
-import type { ExecResult } from './exec.js';
+import type { ExecOptions, ExecResult } from './exec.js';
 import { log } from './log.js';
 
 /** Timeout for ordinary git plumbing commands. */
@@ -27,14 +27,27 @@ const GIT_SLOW_TIMEOUT_MS = 10 * 60_000;
 /** Identity used when the repository has no configured committer. */
 const FALLBACK_IDENTITY = { name: 'flashover', email: 'flashover@localhost' } as const;
 
+/** Extra exec options a git call may need. */
+type GitExecOptions = Pick<ExecOptions, 'maxBufferChars' | 'stdoutPath'>;
+
 /** Run git and return the result without throwing. */
-async function git(args: readonly string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promise<ExecResult> {
-  return execFile('git', args, { cwd, timeoutMs });
+async function git(
+  args: readonly string[],
+  cwd: string,
+  timeoutMs = GIT_TIMEOUT_MS,
+  extra?: GitExecOptions,
+): Promise<ExecResult> {
+  return execFile('git', args, { cwd, timeoutMs, ...(extra ?? {}) });
 }
 
 /** Run git, throwing a {@link FlashoverError} on failure. */
-async function gitOrThrow(args: readonly string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promise<string> {
-  const result = await git(args, cwd, timeoutMs);
+async function gitOrThrow(
+  args: readonly string[],
+  cwd: string,
+  timeoutMs = GIT_TIMEOUT_MS,
+  extra?: GitExecOptions,
+): Promise<string> {
+  const result = await git(args, cwd, timeoutMs, extra);
   if (!succeeded(result)) {
     const detail = result.stderr.trim() === '' ? result.stdout.trim() : result.stderr.trim();
     throw new FlashoverError(`git ${args.join(' ')} failed (${describeFailure(result)}).`, detail === '' ? undefined : detail);
@@ -254,9 +267,17 @@ export async function stageAll(worktreePath: string): Promise<void> {
  *
  * Binary files report `-` for both counts in numstat; they are counted as
  * changed files contributing zero lines.
+ *
+ * Read without an output cap. numstat emits one line per changed file, so a
+ * wide change overruns the default buffer limit, and because that limit keeps
+ * the *tail* the dropped lines are silently missing files. Undercounting here
+ * would corrupt the churn tie-breaker in ranking, which is exactly the signal
+ * meant to catch an agent that reformatted half the repository.
  */
 export async function stagedDiffStat(worktreePath: string): Promise<DiffStat> {
-  const output = await gitOrThrow(['diff', '--cached', '--numstat'], worktreePath, GIT_SLOW_TIMEOUT_MS);
+  const output = await gitOrThrow(['diff', '--cached', '--numstat'], worktreePath, GIT_SLOW_TIMEOUT_MS, {
+    maxBufferChars: Number.POSITIVE_INFINITY,
+  });
   return parseNumstat(output);
 }
 
@@ -293,14 +314,25 @@ export async function hasNoStagedChanges(worktreePath: string): Promise<boolean>
  *
  * `--binary` is used so the patch round-trips through `git apply` even when
  * binary assets changed.
+ *
+ * git writes straight to the file rather than through a buffer. Buffering broke
+ * this in two independent ways, both silent: the default output cap retains only
+ * the *tail*, so any patch over the cap lost its leading `diff --git` header and
+ * `git apply` rejected the result outright; and decoding to UTF-8 corrupts diffs
+ * of files that are not valid UTF-8. A patch is either byte-exact or it is
+ * worthless, and this one is also what the judge scores and what
+ * `--promote patch` hands back.
  */
 export async function exportStagedPatch(worktreePath: string, outputPath: string): Promise<void> {
-  const result = await git(['diff', '--cached', '--binary'], worktreePath, GIT_SLOW_TIMEOUT_MS);
+  // Created before spawning, because git streams directly into this path.
+  await mkdir(dirname(outputPath), { recursive: true });
+
+  const result = await git(['diff', '--cached', '--binary'], worktreePath, GIT_SLOW_TIMEOUT_MS, {
+    stdoutPath: outputPath,
+  });
   if (!succeeded(result)) {
     throw new FlashoverError(`Failed to export patch from ${worktreePath} (${describeFailure(result)}).`, result.stderr.trim() || undefined);
   }
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, result.stdout, 'utf8');
 }
 
 /**

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { commandExists, describeFailure, execFile, execShell, succeeded } from '../src/exec.js';
+import { commandExists, describeFailure, execFile, execShell, posixShellAvailable, succeeded } from '../src/exec.js';
 
 const CWD = mkdtempSync(join(tmpdir(), 'flashover-exec-'));
 
@@ -157,14 +157,73 @@ describe('output limits', () => {
     assert.match(chunks.join(''), /one/);
     assert.match(chunks.join(''), /two/);
   });
+
+  it('writes stdout to a file verbatim, ignoring the cap', async () => {
+    // The escape hatch that keeps large patches intact. Deliberately spawns node
+    // rather than a shell, so the guarantee is tested on every platform.
+    const target = join(CWD, `stdout-path-${Date.now()}.out`);
+    const size = 400_000;
+
+    const result = await execFile(process.execPath, ['-e', `process.stdout.write('x'.repeat(${size}))`], {
+      cwd: CWD,
+      stdoutPath: target,
+      // Far below the payload: proves the cap does not apply to this path.
+      maxBufferChars: 1000,
+    });
+
+    assert.ok(succeeded(result), `exec failed: ${result.spawnError ?? result.stderr}`);
+    assert.equal(result.stdout, '', 'buffered stdout stays empty in file mode');
+    assert.equal(statSync(target).size, size, 'file must hold the whole payload');
+  });
+
+  it('resolves only after the stdout file has flushed', async () => {
+    // The child can close before its output finishes draining, so a caller that
+    // reads the file the moment exec resolves would otherwise see a short read.
+    const target = join(CWD, `stdout-flush-${Date.now()}.out`);
+    const size = 2_000_000;
+
+    await execFile(process.execPath, ['-e', `process.stdout.write('y'.repeat(${size}))`], {
+      cwd: CWD,
+      stdoutPath: target,
+    });
+
+    assert.equal(statSync(target).size, size);
+  });
 });
 
 describe('commandExists', () => {
   it('finds a binary that is present', async () => {
-    assert.equal(await commandExists('sh'), true);
+    // git rather than sh: flashover requires git unconditionally, and this
+    // resolver deliberately no longer depends on a shell being installed.
+    assert.equal(await commandExists('git'), true);
   });
 
   it('reports a binary that is absent', async () => {
     assert.equal(await commandExists('flashover-definitely-not-a-real-binary'), false);
+  });
+
+  it('resolves without spawning a shell', async () => {
+    // Regression: the old implementation asked `sh -c "command -v ..."`, so
+    // wherever sh is missing every binary was reported missing — including git,
+    // on the same doctor run that had just used git to read the repository.
+    assert.equal(await commandExists('node'), true);
+  });
+
+  it('checks an explicit path directly instead of searching PATH', async () => {
+    assert.equal(await commandExists(process.execPath), true);
+    assert.equal(await commandExists(join(CWD, 'nope-not-here')), false);
+  });
+
+  it('rejects an empty name', async () => {
+    assert.equal(await commandExists('   '), false);
+  });
+});
+
+describe('posixShellAvailable', () => {
+  it('agrees with PATH resolution of sh', async () => {
+    // Two independent mechanisms — actually spawning the shell versus resolving
+    // it on PATH — must not disagree. Their disagreement was the bug: doctor
+    // reported binaries as missing based on a shell it never verified existed.
+    assert.equal(await posixShellAvailable(), await commandExists('sh'));
   });
 });

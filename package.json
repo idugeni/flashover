@@ -20,6 +20,9 @@
   "engines": {
     "node": ">=20.11"
   },
+  "os": [
+    "!win32"
+  ],
   "bin": {
     "flashover": "dist/cli.js"
   },

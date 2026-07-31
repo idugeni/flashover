@@ -54,10 +54,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/flashover.git"
+    "url": "git+https://github.com/idugeni/flashover.git"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/flashover/issues"
+    "url": "https://github.com/idugeni/flashover/issues"
   },
-  "homepage": "https://github.com/OWNER/flashover#readme"
+  "homepage": "https://github.com/idugeni/flashover#readme"
 }

@@ -7,7 +7,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/OWNER/flashover
+git clone https://github.com/idugeni/flashover
 cd flashover
 npm install
 npm run build

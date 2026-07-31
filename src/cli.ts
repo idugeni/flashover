@@ -97,7 +97,7 @@ ${style.bold('HOW IT WORKS')}
   clobber each other. The diff is captured before any gate runs, then gates score
   it. The winner becomes a branch; your working tree is never touched.
 
-Docs: https://github.com/OWNER/flashover
+Docs: https://github.com/idugeni/flashover
 `;
 
 interface ParsedCli {
@@ -429,7 +429,7 @@ async function detectProjectGates(repoRoot: string): Promise<DetectedProject> {
 function renderStarterConfig(detected: DetectedProject): string {
   const lines: string[] = [
     '# flashover configuration',
-    '# Docs: https://github.com/OWNER/flashover',
+    '# Docs: https://github.com/idugeni/flashover',
     'version: 1',
     '',
     '# Which agent runs, and how many copies. Repeat entries to mix agents.',

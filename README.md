@@ -291,7 +291,7 @@ console.log(report.winnerId, report.promotedBranch);
 
 ## Contributing
 
-Agent CLIs move fast and presets rot. If one is wrong, [open an issue](https://github.com/OWNER/flashover/issues) — that is the single most useful contribution to this project.
+Agent CLIs move fast and presets rot. If one is wrong, [open an issue](https://github.com/idugeni/flashover/issues) — that is the single most useful contribution to this project.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
